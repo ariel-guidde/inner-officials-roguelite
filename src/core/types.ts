@@ -26,6 +26,11 @@ export const AGENT_TIER_COLORS: Record<AgentTier, string> = {
   jade:   '#00a86b',
 } as const
 
+/** English-only tier names (no Chinese prefix). */
+export const AGENT_TIER_NAMES: Record<AgentTier, string> = {
+  clay: 'Clay', bronze: 'Bronze', silver: 'Silver', gold: 'Gold', jade: 'Jade',
+} as const
+
 export const AGENT_TIER_ORDER: AgentTier[] = ['clay', 'bronze', 'silver', 'gold', 'jade']
 
 export function tierAtLeast(a: AgentTier, b: AgentTier): boolean {
@@ -71,6 +76,12 @@ export const STAT_LABELS: Record<StatName, { en: string; zh: string }> = {
   scholarship:     { en: 'Scholarship',     zh: '学识' },
 } as const
 
+/** 3-letter abbreviations for compact UI display. */
+export const STAT_ABBREVIATIONS: Record<StatName, string> = {
+  beauty: 'Bty', cunning: 'Cng', eloquence: 'Elq', discretion: 'Dsc',
+  resolve: 'Rsv', vitality: 'Vtl', resourcefulness: 'Rsf', spiritualArts: 'Spr', scholarship: 'Sch',
+} as const
+
 /** All 9 core stats. Martial is a separate optional property on StatBlock. */
 export type StatBlock = Record<StatName, number> & {
   /** Guards only — 0–5. Absent means 0. */
@@ -108,20 +119,126 @@ export const BLOCKING_CONDITIONS: ReadonlySet<AgentCondition> = new Set([
   'imprisoned',
 ])
 
+export const CONDITION_ICONS: Record<AgentCondition, string> = {
+  poisoned: '☠', ill: '🤒', injured: '🩸', disgraced: '👁',
+  imprisoned: '⛓', mourning: '🕯', pregnant: '🌸', cursed: '🌀',
+} as const
+
+/** Semantic background + foreground colors for condition chips. */
+export const CONDITION_COLORS: Record<AgentCondition, { bg: string; text: string }> = {
+  poisoned:   { bg: 'rgba(80,120,30,0.25)',   text: '#90c050' },
+  ill:        { bg: 'rgba(180,120,30,0.2)',   text: '#d09040' },
+  injured:    { bg: 'rgba(204,43,0,0.2)',     text: '#e06040' },
+  disgraced:  { bg: 'rgba(100,20,20,0.25)',   text: '#c06060' },
+  imprisoned: { bg: 'rgba(80,0,0,0.3)',       text: '#c04040' },
+  mourning:   { bg: 'rgba(60,60,80,0.25)',    text: '#a0a0c0' },
+  pregnant:   { bg: 'rgba(180,140,160,0.2)',  text: '#d0a8c0' },
+  cursed:     { bg: 'rgba(80,30,120,0.25)',   text: '#b070d0' },
+} as const
+
 // ---------------------------------------------------------------------------
 // AGENT TAGS
 // ---------------------------------------------------------------------------
 
-export type AgentTag =
-  | 'maid'
-  | 'eunuch'
-  | 'scholar'
-  | 'guard'
-  | 'consort'
-  | 'monk'
-  | 'merchant'
-  | 'noble'
-  | 'protagonist'
+/** Gender */
+export type GenderTag = 'female' | 'male'
+
+/** Legal/social standing */
+export type StatusTag = 'imperial' | 'noble' | 'official' | 'commoner' | 'servant' | 'slave'
+
+/** Inner court role (women in the harem hierarchy) */
+export type CourtRoleTag = 'empress' | 'concubine' | 'palace-lady' | 'matriarch'
+
+/** Professional service role */
+export type ServiceRoleTag =
+  | 'eunuch' | 'maid' | 'guard' | 'scholar'
+  | 'physician' | 'entertainer' | 'priest' | 'merchant' | 'cook'
+
+/** Game-mechanical classification */
+export type MechanicalTag = 'protagonist' | 'follower' | 'scapegoat-eligible'
+
+export type AgentTag = GenderTag | StatusTag | CourtRoleTag | ServiceRoleTag | MechanicalTag
+
+export type TagCategory = 'gender' | 'status' | 'court-role' | 'service-role' | 'mechanical'
+
+export const TAG_CATEGORY: Record<AgentTag, TagCategory> = {
+  // gender
+  female: 'gender',    male: 'gender',
+  // status
+  imperial: 'status',  noble: 'status',  official: 'status',
+  commoner: 'status',  servant: 'status', slave: 'status',
+  // court-role
+  empress: 'court-role',  concubine: 'court-role',
+  'palace-lady': 'court-role',  matriarch: 'court-role',
+  // service-role
+  eunuch: 'service-role',  maid: 'service-role',  guard: 'service-role',
+  scholar: 'service-role', physician: 'service-role', entertainer: 'service-role',
+  priest: 'service-role',  merchant: 'service-role', cook: 'service-role',
+  // mechanical
+  protagonist: 'mechanical',  follower: 'mechanical',  'scapegoat-eligible': 'mechanical',
+}
+
+export const TAG_LABELS: Record<AgentTag, string> = {
+  female: 'Female',          male: 'Male',
+  imperial: 'Imperial',      noble: 'Noble',        official: 'Official',
+  commoner: 'Commoner',      servant: 'Servant',    slave: 'Slave',
+  empress: 'Empress',        concubine: 'Concubine', 'palace-lady': 'Palace Lady',
+  matriarch: 'Matriarch',
+  eunuch: 'Eunuch',          maid: 'Maid',          guard: 'Guard',
+  scholar: 'Scholar',        physician: 'Physician', entertainer: 'Entertainer',
+  priest: 'Priest',          merchant: 'Merchant',  cook: 'Cook',
+  protagonist: 'Protagonist', follower: 'Follower',  'scapegoat-eligible': 'Expendable',
+}
+
+// ---------------------------------------------------------------------------
+// EQUIPMENT
+// ---------------------------------------------------------------------------
+
+export type EquipmentSlot = 'attire' | 'accessory' | 'tool' | 'weapon'
+
+export const EQUIPMENT_SLOT_ICONS: Record<EquipmentSlot, string> = {
+  attire: '👘', accessory: '💎', tool: '📜', weapon: '⚔',
+} as const
+
+export const EQUIPMENT_SLOT_LABELS: Record<EquipmentSlot, string> = {
+  attire: 'Attire', accessory: 'Accessory', tool: 'Tool', weapon: 'Weapon',
+} as const
+
+export type EquipmentItemTag = 'court' | 'scholarly' | 'spiritual' | 'medicinal' | 'covert' | 'ceremonial'
+
+export const EQUIPMENT_ITEM_TAG_LABELS: Record<EquipmentItemTag, string> = {
+  court: 'Court', scholarly: 'Scholarly', spiritual: 'Spiritual',
+  medicinal: 'Medicinal', covert: 'Covert', ceremonial: 'Ceremonial',
+} as const
+
+export const EQUIPMENT_ITEM_TAG_COLORS: Record<EquipmentItemTag, string> = {
+  court: '#b09050', scholarly: '#4080c0', spiritual: '#8050c0',
+  medicinal: '#408050', covert: '#604060', ceremonial: '#c08040',
+} as const
+
+export interface EquipmentRequirements {
+  /** Agent must have ALL of these tags */
+  tags?: AgentTag[]
+  /** Agent must have AT LEAST ONE of these tags */
+  anyTag?: AgentTag[]
+  minStats?: Partial<Record<StatName, number>>
+  minTier?: AgentTier
+  minMartial?: number
+}
+
+export interface Equipment {
+  id: string
+  name: string
+  slot: EquipmentSlot
+  tier: AgentTier
+  itemTags: EquipmentItemTag[]
+  /** Additive stat bonuses while equipped */
+  statBonus: Partial<StatBlock>
+  requires: EquipmentRequirements
+  description?: string
+}
+
+export type EquipmentLoadout = Partial<Record<EquipmentSlot, Equipment | null>>
 
 // ---------------------------------------------------------------------------
 // AGENT
@@ -137,6 +254,7 @@ export interface Agent {
   stats: StatBlock
   conditions: AgentCondition[]
   tags: AgentTag[]
+  equipment?: EquipmentLoadout
   isProtagonist?: boolean
   /**
    * Resentment level (0–5). Relevant only to Chunhua; 0 for all others.
@@ -146,6 +264,10 @@ export interface Agent {
   resentment?: number
   /** Day on which the agent becomes available again (multi-day lock). */
   lockedUntilDay?: number
+  /** Harem rank (1–9). Shown on concubine cards. */
+  haremRank?: HaremRank
+  /** Override display title (e.g. "Emperor", "Chief Eunuch"). Shown in place of rank. */
+  title?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +469,16 @@ export const RANK_TITLES: Record<HaremRank, { zh: string; en: string }> = {
   2: { zh: '贵妃', en: 'Guifei — Imperial Consort' },
   1: { zh: '皇后', en: 'Huanghou — Empress' },
 } as const
+
+/** "9 · Cairen" — compact badge label. */
+export function agentRankShort(rank: HaremRank): string {
+  return `${rank} · ${RANK_TITLES[rank].en.split(' — ')[0]}`
+}
+
+/** "Rank 9 — Cairen — Talented Lady" — full detail label. */
+export function agentRankFull(rank: HaremRank): string {
+  return `Rank ${rank} — ${RANK_TITLES[rank].en}`
+}
 
 // ---------------------------------------------------------------------------
 // DAY / GAME PHASE

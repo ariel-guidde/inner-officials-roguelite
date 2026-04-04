@@ -26,6 +26,8 @@ export interface DiceProps {
   goldenDiceSpent?: number
   /** Called when the player clicks OK on the result overlay. */
   onDismiss?: () => void
+  /** Called when the player spends a reroll (re-rolls all dice). */
+  onReroll?: () => void
   /**
    * Override the result shown in the overlay (e.g. after golden dice patch it).
    * Falls back to the physics-determined result when not provided.
@@ -45,6 +47,7 @@ export function Dice({
   canvasHeight = '400px',
   goldenDiceSpent = 0,
   onDismiss,
+  onReroll,
   displayResult,
 }: DiceProps) {
   const { phase, result, rollId, launch, onPhysicsSettled, reset } = useDiceRoll(onRollSettled)
@@ -98,6 +101,7 @@ export function Dice({
           config={prevConfigRef.current}
           goldenDiceSpent={goldenDiceSpent}
           onDismiss={handleDismiss}
+          onReroll={onReroll}
         />
       )}
 

@@ -256,3 +256,70 @@ Spend Fate Points on boons activated at run start:
 - **Dice checks**: show stat totals, dice rolling, success/fail, reroll/golden dice options
 - **Fate's Ledger**: between-run boon shop
 - **1001 Nights**: achievement tracker
+
+---
+
+## Card Visual Design (Reference for Inner Officials)
+
+This section documents the Sultan's Game card visual language specifically for use when designing Inner Officials cards.
+
+### Card Face Layout
+
+```
+┌─────────────────────────┐
+│  [TIER ORNAMENTAL FRAME] │  ← Frame colour/style is the tier signal
+│  ┌───────────────────┐  │
+│  │                   │  │
+│  │   PORTRAIT ART    │  │  ← Fills ~65% of card face
+│  │  (upgrades with   │  │
+│  │   tier promotion) │  │
+│  └───────────────────┘  │
+│  NAME          [TIER]   │  ← Name strip; tier label top-right
+│  ──────────────────────  │
+│  ⚔3  💃5  📚2  🌿1     │  ← Stat icons + numbers (only non-zero shown)
+│  [Wpn][Att][Acc]         │  ← Equipment slot icons
+│  [Noble][Female][Dancer] │  ← Classification tags
+└─────────────────────────┘
+```
+
+### Tier Frame Design
+Each tier has a distinct ornamental frame — the border is the primary tier signal, not a badge:
+- **Stone**: Rough unfinished stone border, grey-brown
+- **Bronze**: Weathered copper filigree with archaic vessel (taotie-like) motifs  
+- **Silver**: Clean silver lattice with refined geometric patterning
+- **Gold**: Ornate gold flourishes with crowns/gem accents
+
+Frame complexity increases with tier. A Gold card is visually heavier and more elaborate than a Stone card.
+
+### Portrait Treatment
+- Portrait art occupies the majority of the card face
+- Live2D animated in Sultan's Game (static in our game initially)
+- The portrait itself upgrades visually when a character's tier is promoted (the same character appears in finer clothing, with more elaborate styling)
+- For agents without custom art: a **stylised silhouette in the same frame** is used — same border, same colour treatment, shadowed figure in a thematically appropriate pose
+
+### Stats on Card Face
+- Only stats above 0 are shown
+- Each stat has a **small icon symbol** (not text), with a number beside it
+- Stats are arranged horizontally in a compact row — typically 4-5 stats visible at once
+- Stats visually update when conditions apply penalties (shown as red/reduced numbers)
+
+### Equipment Slots
+- Shown as **3 small square slots** with category icons: Weapon · Attire · Accessory
+- Empty slots show a faded icon; filled slots show the item's icon or coloured fill
+- Items are cards themselves — dragged from hand onto slots
+
+### Classification Tags
+- Displayed as small coloured chips along the card bottom
+- Examples: Noble, Slave, Female, Dancer, Troop, Follower, Free Person
+- Tags gate event eligibility (e.g. "requires Noble") — they are mechanical, not merely flavour
+
+### Condition Display
+- Active conditions appear as small icons overlaid on the portrait corner
+- The underlying stat numbers visibly drop to reflect penalties
+- Severely blocked characters (Frozen, Imprisoned) get a full overlay tint
+
+### Hand Display
+- Characters are held in a **scrollable hand at the bottom** of the screen
+- Cards are dragged from hand to event slots on the map
+- Cards in use ("Involved") are locked with a visual indicator until the event resolves
+- The hand also contains item cards, intelligence cards, and Sultan Cards — all unified as a card hand

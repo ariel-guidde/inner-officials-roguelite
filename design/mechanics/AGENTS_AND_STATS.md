@@ -54,22 +54,38 @@ The protagonist starts at **Bronze** tier and can advance through story events a
 
 ---
 
-## Agent Types
+## Agent Types & Tag System
 
-### By Ownership
-- **Followers**: Autonomous characters with their own loyalty, storylines, and desires. They can refuse tasks, betray you, or leave.
-- **Servants**: Owned/assigned staff. More reliable but lower tier. Can be reassigned by higher-ranking consorts or the Empress.
+Tags are fixed classification attributes. Each agent carries one tag from each applicable category. Events filter on tags to determine eligibility (e.g. "requires female servant" or "noble or imperial only").
 
-### By Role
-| Tag | Description | Key Stats |
+**Full taxonomy and all named characters are defined in [AGENT_CARDS.md](./AGENT_CARDS.md).**
+
+### Tag Categories at a Glance
+
+| Category | Tags |
+|---|---|
+| **Gender** | `female` · `male` |
+| **Legal/Social Status** | `imperial` · `noble` · `official` · `commoner` · `servant` · `slave` |
+| **Inner Court Role** (women) | `empress` · `concubine` · `palace-lady` · `matriarch` |
+| **Service Role** | `eunuch` · `maid` · `guard` · `scholar` · `physician` · `entertainer` · `priest` · `merchant` · `cook` |
+| **Game-Mechanical** | `protagonist` · `follower` · `scapegoat-eligible` |
+
+### Ownership Types
+- **Followers**: Autonomous characters with their own loyalty, storylines, and desires. Can refuse tasks, betray you, or leave. Tagged `follower`.
+- **Servants**: Bonded palace staff. More reliable but lower tier. Can be reassigned by higher-ranking consorts or the Empress. Tagged `servant` or `slave`.
+
+### Service Roles Summary
+| Role Tag | Who | Key Stats |
 |---|---|---|
-| **Maid** (宫女) | General-purpose palace servants | Variable |
-| **Eunuch** (太监) | Male palace servants, political fixers, spies | Discretion, Cunning |
-| **Scholar** (学者) | Tutors, scribes, physicians | Scholarship, Spiritual Arts |
-| **Guard** (侍卫) | Palace guards, can be bribed or befriended — the only agents with **Martial** ability | Resolve, Vitality, Martial |
-| **Consort** (嫔妃) | Other concubines — rivals or allies | Beauty, Eloquence |
-| **Monk/Nun** (僧尼) | Buddhist/Taoist clergy with palace access | Spiritual Arts, Scholarship |
-| **Merchant** (商贾) | Outside contacts through Wu family network | Resourcefulness, Cunning |
+| `maid` | Female personal attendants | Variable |
+| `eunuch` | Male palace servants; political fixers, spies, treasurers | Cunning, Discretion |
+| `scholar` | Scribes, tutors, academicians | Scholarship, Eloquence |
+| `physician` | Medical doctors, apothecaries | Scholarship, Vitality |
+| `guard` | Palace military; only agents with Martial and a Weapon slot | Resolve, Vitality + Martial |
+| `entertainer` | Musicians, dancers, poets | Beauty, Eloquence |
+| `priest` | Buddhist/Taoist clergy with palace access | Spiritual Arts, Scholarship |
+| `merchant` | Outside-contact traders via Wu family network | Resourcefulness, Cunning |
+| `cook` | Palace kitchen staff; banquet and poisoning events | Vitality, Resourcefulness |
 
 ---
 
@@ -145,7 +161,7 @@ Chunhua has her own narrative arc involving her family outside the palace, a pot
 | Method | Cost | Effect |
 |---|---|---|
 | **Scrolls** (from Imperial Library) | 1 silver | +1 to a stat permanently |
-| **Equipment** (accessories, makeup, clothing) | Variable | Stat bonuses while equipped (see [Equipment](../world/EQUIPMENT_AND_ITEMS.md)) |
+| **Equipment** (attire, accessories, tools, weapons) | Variable | Stat bonuses while equipped; items have type tags and equip requirements (see [Equipment & Items](../world/EQUIPMENT_AND_ITEMS.md)) |
 | **Training** (from Eunuch Quarter) | 5 silver per agent | Train eunuch agents with specific stat profiles |
 | **Storyline progression** | Time + events | Tier upgrades, unique abilities |
 | **Festival performances** | Event success | Temporary or permanent boosts from impressing the Emperor |

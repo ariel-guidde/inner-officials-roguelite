@@ -5,13 +5,14 @@ interface ResultOverlayProps {
   config: DiceRollConfig
   goldenDiceSpent: number
   onDismiss: () => void
+  onReroll?: () => void
 }
 
 /**
  * Absolute-positioned HTML overlay that appears after dice settle.
  * Shows the result and an explicit OK button to continue.
  */
-export function ResultOverlay({ result, config, goldenDiceSpent, onDismiss }: ResultOverlayProps) {
+export function ResultOverlay({ result, config, goldenDiceSpent, onDismiss, onReroll }: ResultOverlayProps) {
   const passColor   = result.isSuccess ? 'text-jade'        : 'text-vermilion'
   const borderColor = result.isSuccess ? 'border-jade/40'   : 'border-vermilion/40'
   const bgColor     = result.isSuccess ? 'bg-jade/10'       : 'bg-vermilion/10'
@@ -66,17 +67,23 @@ export function ResultOverlay({ result, config, goldenDiceSpent, onDismiss }: Re
           ))}
         </div>
 
-        {/* Dismiss */}
-        <button
-          onClick={onDismiss}
-          className={`
-            mt-4 px-8 py-1.5 rounded-lg border font-serif text-sm tracking-widest
-            transition-colors duration-200
-            ${okColor}
-          `}
-        >
-          ok
-        </button>
+        {/* Actions */}
+        <div className="mt-4 flex items-center justify-center gap-3">
+          {onReroll && (
+            <button
+              onClick={onReroll}
+              className="px-5 py-1.5 rounded-lg border font-serif text-sm tracking-widest transition-colors duration-200 border-gold/50 text-gold hover:bg-gold/15"
+            >
+              ↺ Reroll
+            </button>
+          )}
+          <button
+            onClick={onDismiss}
+            className={`px-8 py-1.5 rounded-lg border font-serif text-sm tracking-widest transition-colors duration-200 ${okColor}`}
+          >
+            ok
+          </button>
+        </div>
       </div>
     </div>
   )
