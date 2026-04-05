@@ -330,16 +330,31 @@ export type IntelligenceType =
   | 'beautyTechniques'
 
 export const INTELLIGENCE_LABELS: Record<IntelligenceType, { en: string; zh: string }> = {
-  courtWhispers:    { en: 'Court Whispers',     zh: '宫闱密语' },
-  palaceSecrets:    { en: 'Palace Secrets',     zh: '宫中秘辛' },
-  medicalNotes:     { en: 'Medical Notes',      zh: '医案' },
-  spiritualOmens:   { en: 'Spiritual Omens',    zh: '天兆' },
-  beautyTechniques: { en: 'Beauty Techniques',  zh: '容术' },
+  courtWhispers:    { en: 'Court Whispers',    zh: '宫闱密语' },
+  palaceSecrets:    { en: 'Palace Secrets',    zh: '宫中秘辛' },
+  medicalNotes:     { en: 'Medical Notes',     zh: '医案' },
+  spiritualOmens:   { en: 'Spiritual Omens',   zh: '天兆' },
+  beautyTechniques: { en: 'Beauty Techniques', zh: '容术' },
+} as const
+
+/**
+ * Stats each scroll type is aligned with.
+ * If a scroll's matching stats overlap the event's statsChecked,
+ * spending it grants +1 bonus die on the reroll.
+ */
+export const INTELLIGENCE_MATCHING_STATS: Record<IntelligenceType, StatName[]> = {
+  courtWhispers:    ['eloquence', 'cunning'],
+  palaceSecrets:    ['discretion', 'resourcefulness'],
+  medicalNotes:     ['scholarship', 'vitality'],
+  spiritualOmens:   ['spiritualArts', 'resolve'],
+  beautyTechniques: ['beauty'],
 } as const
 
 export interface IntelligenceScroll {
   id: string
   type: IntelligenceType
+  /** Tier determines the scroll's power — higher tiers give larger bonus dice on a stat match. */
+  tier: AgentTier
 }
 
 // ---------------------------------------------------------------------------
@@ -392,8 +407,17 @@ export interface EventSlot {
   id: string
   assignedAgentId: string | null
   isMandatory: boolean
+  /** Agent must have ALL of these tags. */
   requiredTags: AgentTag[]
+  /** Agent must have AT LEAST ONE of these tags (OR logic). */
+  anyRequiredTag?: AgentTag[]
   requiredTier?: AgentTier
+  /**
+   * Pre-assigned NPC agent (non-player-controlled).
+   * When set, this slot is informational only — it shows the NPC's card
+   * in the event but cannot be interacted with by the player.
+   */
+  npcAgentId?: string
 }
 
 export interface GameEvent {
@@ -405,13 +429,32 @@ export interface GameEvent {
   urgency: EventUrgency
   statsChecked: [StatName] | [StatName, StatName]
   threshold: number
+  /** Days until this event expires if left unattended (null = no deadline). */
   daysRemaining: number | null
-  slots: EventSlot[]
+  /** How many full days agents are committed before the event resolves. */
   durationDays: number
   isCompleted: boolean
   isExpired: boolean
   /** Opposition stat total. 0 = uncontested. */
   oppositionValue: number
+  /** Agent assignment slots for this event. */
+  slots: EventSlot[]
+  /**
+   * One optional intelligence scroll placed into this event.
+   * Consumed on commitment; boosts the dice pool at resolution.
+   */
+  assignedScroll: IntelligenceScroll | null
+  /**
+   * True once the player has committed agents via Continue.
+   * Agents are locked until the event resolves.
+   */
+  inProgress: boolean
+  /**
+   * The day number when this event will roll its dice.
+   * Set to currentDay + durationDays when agents are committed.
+   * Null when not yet in progress.
+   */
+  resolveOnDay: number | null
 }
 
 export interface MapNodeData {
@@ -422,6 +465,30 @@ export interface MapNodeData {
   isUnlocked: boolean
   isVisible: boolean
 }
+
+// ---------------------------------------------------------------------------
+// NARRATIVE — stub types (narrative module not yet implemented)
+// Consequence is the atomic unit of outcome effects applied after resolution.
+// ---------------------------------------------------------------------------
+
+export type Consequence =
+  | { kind: 'scroll';           scroll: IntelligenceScroll }
+  | { kind: 'goldenDice';       amount: number }
+  | { kind: 'rerolls';          amount: number }
+  | { kind: 'condition';        agentId: string; condition: AgentCondition }
+  | { kind: 'removeCondition';  agentId: string; condition: AgentCondition }
+  | { kind: 'relationship';     npcId: string; delta: number }
+  | { kind: 'unlockLocation';   locationId: LocationId }
+  | { kind: 'triggerEvent';     eventId: string }
+  | { kind: 'narrative';        text: string }
+
+export type OutcomeCondition =
+  | 'criticalSuccess'
+  | 'success'
+  | 'marginalSuccess'
+  | 'failure'
+  | 'criticalFailure'
+  | 'expired'
 
 // ---------------------------------------------------------------------------
 // REPUTATION METRICS

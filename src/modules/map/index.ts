@@ -1,3 +1,5 @@
 export { Map, type MapProps } from './Map'
 export { getUnlockedNodes, getVisibleNodes } from './logic/unlockRules'
 export { LOCATION_LAYOUT } from './logic/layoutData'
+export { URGENCY_COLOR, URGENCY_LABEL, IN_PROGRESS_COLOR, nodeUrgency, assignedAgentIds, agentMeetsSlot, type ResolutionEntry, type ResolutionOutcome } from './logic/eventUtils'
+export { computeEventPool, scrollBonusDice } from './logic/poolCalculation'
