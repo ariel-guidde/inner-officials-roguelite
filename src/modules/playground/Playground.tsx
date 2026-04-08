@@ -4,30 +4,36 @@
 // =============================================================================
 
 import { useState, useEffect } from 'react'
-import type { Agent, AgentCondition, AgentTier, DiceRollConfig, DiceRollResult, Equipment, EquipmentSlot, GameEvent, IntelligenceScroll, LocationId, MapNodeData, StatName } from '@core/types'
+import type { Agent, AgentCondition, AgentTier, DiceRollConfig, DiceRollResult, Equipment, EquipmentSlot, GameEvent, IntelligenceItem, IntelligenceType, LocationId, MapNodeData, StatName } from '@core/types'
 import { ALL_STATS, STAT_LABELS, CONDITION_LABELS, AGENT_TIER_ORDER, BLOCKING_CONDITIONS, EQUIPMENT_SLOT_ICONS, EQUIPMENT_SLOT_LABELS } from '@core/types'
 import { bus } from '@core/events'
 import { passChance, rollFeeling } from '@modules/dice'
 import { Dice }       from '@modules/dice'
-import { Map, type ResolutionEntry, URGENCY_COLOR, URGENCY_LABEL, computeEventPool } from '@modules/map'
+import { Map as PalaceMap, type ResolutionEntry, URGENCY_COLOR, URGENCY_LABEL } from '@modules/map'
 import { Characters, meetsRequirements, applyEquipmentBonuses } from '@modules/characters'
 import { Inventory }  from '@modules/inventory'
 import { DICE_DEFAULTS }          from './configs/diceDefaults'
-import { MAP_DEFAULTS }           from './configs/mapDefaults'
+import { buildEmptyMapNodes }     from './configs/mapDefaults'
 import { CHARACTERS_DEFAULTS }    from './configs/charactersDefaults'
 import { ALL_EQUIPMENT }          from './configs/equipmentDefaults'
 import { INTELLIGENCE_DEFAULTS }  from './configs/intelligenceDefaults'
+import {
+  StorylineEditor,
+  type EventRuntimeState,
+  type ResolutionType,
+  ALL_EVENT_DEFINITIONS,
+  ALL_STORYLINES,
+  EVENT_DEFINITIONS_BY_ID as DEFS_BY_ID,
+  type SpawnContext,
+} from '@modules/events'
+import {
+  type ResolutionQueueItem,
+  assignSlot, assignIntelligence, commitEvent, cancelCommit,
+  spawnEventsOnMap, buildResolutionQueue, advanceDayOnMap,
+  UNLOCKED_BY_DEFAULT,
+} from '@modules/map'
 
-type ActiveModule = 'dice' | 'map' | 'characters' | 'inventory'
-
-interface ResolutionQueueItem {
-  event: GameEvent
-  assignedAgents: Agent[]
-  pool: number
-  tier: AgentTier
-  statTotals: Partial<Record<StatName, number>>
-  isExpired?: boolean
-}
+type ActiveModule = 'dice' | 'map' | 'characters' | 'inventory' | 'events'
 
 export interface PlaygroundProps {
   activeModule?: ActiveModule
@@ -42,7 +48,7 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
   const [eventLog, setEventLog] = useState<string[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<LocationId | null>(null)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const [mapNodes, setMapNodes] = useState<MapNodeData[]>(MAP_DEFAULTS)
+  const [mapNodes, setMapNodes] = useState<MapNodeData[]>(() => buildEmptyMapNodes())
   const [currentDay, setCurrentDay] = useState(1)
 
   // Available agents = Lady Wu + her followers only (not NPCs, rivals, imperial figures)
@@ -99,10 +105,61 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
   // Golden dice — add an auto-success to a settled roll
   const [goldenDiceAvailable, setGoldenDiceAvailable] = useState(3)
   const [goldenDiceSpent, setGoldenDiceSpent] = useState(0)
-  // Intelligence scrolls — named, tiered, stat-typed card objects; reroll dice when spent
-  const [intelligenceScrolls, setIntelligenceScrolls] = useState<IntelligenceScroll[]>(INTELLIGENCE_DEFAULTS)
-  // Rerolls — simple generic reroll resource (dice module only, not from map)
+  // Intelligence — counted resource (no longer scroll cards)
+
+  // Rerolls — simple generic reroll resource (dice module only)
   const [rerollsAvailable, setRerollsAvailable] = useState(1)
+  // Event runtime states — the state machine for every event definition
+  const [eventStates, setEventStates] = useState<Map<string, EventRuntimeState>>(() => new Map())
+  // Active storylines — which storylines spawn events on the map
+  const [activeStorylineIds, setActiveStorylineIds] = useState<Set<string>>(
+    () => new Set(ALL_STORYLINES.map(s => s.id))
+  )
+
+  // ── Spawn context + pool draw using shared utilities ──
+  const buildSpawnContext = (): SpawnContext => ({
+    currentDay,
+    eventStates,
+    unlockedLocations: new Set<LocationId>(UNLOCKED_BY_DEFAULT),
+  })
+
+  const runPoolDraw = () => {
+    const ctx = buildSpawnContext()
+    const result = spawnEventsOnMap(mapNodes, eventStates, ctx, currentDay)
+    setMapNodes(result.nodes)
+    setEventStates(result.states)
+  }
+
+  // Spawn on mount
+  useEffect(() => {
+    runPoolDraw()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleToggleStoryline = (id: string) => {
+    setActiveStorylineIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Re-draw when storylines toggle
+  useEffect(() => {
+    // Clear map and re-run pool
+    setMapNodes(prev => prev.map(node => ({ ...node, events: [] })))
+    // Reset non-resolved event states
+    setEventStates(prev => {
+      const next = new Map(prev)
+      for (const [id, s] of next) {
+        if (s.state === 'onMap') next.delete(id)
+      }
+      return next
+    })
+    runPoolDraw()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStorylineIds])
 
   const logEvent = (msg: string) =>
     setEventLog((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 49)])
@@ -181,113 +238,45 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
   }
 
   const handleSlotAssign = (eventId: string, slotId: string, agentId: string | null) => {
-    setMapNodes(prev => prev.map(node => ({
-      ...node,
-      events: node.events.map(ev => ev.id !== eventId ? ev : {
-        ...ev,
-        slots: ev.slots.map(s => s.id !== slotId ? s : { ...s, assignedAgentId: agentId }),
-      }),
-    })))
+    setMapNodes(prev => assignSlot(prev, eventId, slotId, agentId))
     const agentName = agentId ? (agents.find(a => a.id === agentId)?.name ?? agentId) : 'unassigned'
     logEvent(`slot:assigned — ${slotId} → ${agentName}`)
   }
 
-  const handleScrollAssign = (eventId: string, scroll: IntelligenceScroll | null) => {
-    setMapNodes(prev => prev.map(node => ({
-      ...node,
-      events: node.events.map(ev => ev.id !== eventId ? ev : { ...ev, assignedScroll: scroll }),
-    })))
-    logEvent(`scroll:assigned — ${eventId} → ${scroll ? scroll.type : 'none'}`)
+  const handleIntelAssign = (eventId: string, intelItem: IntelligenceItem | null) => {
+    setMapNodes(prev => assignIntelligence(prev, eventId, intelItem))
+    logEvent(`intel:assigned — ${eventId} → ${intelItem ? `${intelItem.type}/${intelItem.tier}` : 'none'}`)
   }
 
-  // ── End-of-day resolution ─────────────────────────────────────────
-
-  const buildQueueItem = (ev: GameEvent, assignedAgents: Agent[]) => {
-    const statTotals = Object.fromEntries(
-      ev.statsChecked.map(stat => [
-        stat,
-        assignedAgents.reduce((sum, a) => {
-          const eff = applyEquipmentBonuses(a.stats, a.equipment) as Record<string, number>
-          return sum + (eff[stat] ?? 0)
-        }, 0),
-      ])
-    ) as Partial<Record<StatName, number>>
-
-    const pool = computeEventPool(assignedAgents, ev) ?? 0
-
-    const tier = assignedAgents.reduce<AgentTier>(
-      (best, a) => AGENT_TIER_ORDER.indexOf(a.tier) > AGENT_TIER_ORDER.indexOf(best) ? a.tier : best,
-      'clay',
-    )
-
-    return { statTotals, pool, tier }
+  const handleCommitEvent = (eventId: string) => {
+    const { nodes } = commitEvent(mapNodes, eventId, currentDay)
+    setMapNodes(nodes)
+    logEvent(`event:committed — ${eventId}`)
   }
+
+  const handleCancelCommit = (eventId: string) => {
+    const result = cancelCommit(mapNodes, eventId, currentDay)
+    if (!result) return
+    setMapNodes(result.nodes)
+    logEvent(`event:cancel — ${eventId}`)
+  }
+
+  // ── End-of-day resolution (uses shared buildResolutionQueue) ──────
 
   const handleEndDay = () => {
-    const queue: ResolutionQueueItem[] = []
-    // Multi-day events to commit (set inProgress=true), keyed by eventId
-    const toCommit: { eventId: string; resolveOnDay: number; scrollId: string | null }[] = []
+    const { queue, toCommit } = buildResolutionQueue(mapNodes, agents, currentDay)
 
-    for (const node of mapNodes) {
-      for (const ev of node.events) {
-        if (ev.isCompleted || ev.isExpired) continue
-
-        // Already in-progress: check if it resolves today
-        if (ev.inProgress) {
-          if (ev.resolveOnDay === currentDay) {
-            const assignedAgents = ev.slots
-              .filter(s => s.assignedAgentId != null)
-              .map(s => agents.find(a => a.id === s.assignedAgentId)!)
-              .filter(Boolean)
-            const { statTotals, pool, tier } = buildQueueItem(ev, assignedAgents)
-            queue.push({ event: ev, assignedAgents, pool, tier, statTotals })
-          }
-          continue
-        }
-
-        const assignedAgents = ev.slots
-          .filter(s => s.assignedAgentId != null)
-          .map(s => agents.find(a => a.id === s.assignedAgentId)!)
-          .filter(Boolean)
-
-        const willResolve = assignedAgents.length > 0 || ev.slots.length === 0
-        const willExpire  = ev.daysRemaining === 1 && !willResolve
-
-        if (willResolve) {
-          if (ev.durationDays > 1 && assignedAgents.length > 0) {
-            // Multi-day: commit now, resolve later
-            toCommit.push({
-              eventId: ev.id,
-              resolveOnDay: currentDay + ev.durationDays,
-              scrollId: ev.assignedScroll?.id ?? null,
-            })
-          } else {
-            const { statTotals, pool, tier } = buildQueueItem(ev, assignedAgents)
-            queue.push({ event: ev, assignedAgents, pool, tier, statTotals })
-          }
-        } else if (willExpire) {
-          queue.push({
-            event: ev, assignedAgents: [], pool: 0, tier: 'clay',
-            statTotals: {}, isExpired: true,
-          })
-        }
-      }
-    }
-
-    // Apply commitments: set inProgress=true and consume scrolls
+    // Apply multi-day commitments
     if (toCommit.length > 0) {
-      const committedEventIds = new Set(toCommit.map(c => c.eventId))
+      const commitMap = new Map(toCommit.map(c => [c.eventId, c]))
       setMapNodes(prev => prev.map(node => ({
         ...node,
         events: node.events.map(ev => {
-          if (!committedEventIds.has(ev.id)) return ev
-          const commit = toCommit.find(c => c.eventId === ev.id)!
+          const commit = commitMap.get(ev.id)
+          if (!commit) return ev
           return { ...ev, inProgress: true, resolveOnDay: commit.resolveOnDay }
         }),
       })))
-      const scrollsToConsume = new Set(toCommit.map(c => c.scrollId).filter(Boolean))
-      if (scrollsToConsume.size > 0)
-        setIntelligenceScrolls(prev => prev.filter(s => !scrollsToConsume.has(s.id)))
       toCommit.forEach(c => logEvent(`event:committed — ${c.eventId}, resolves day ${c.resolveOnDay}`))
     }
 
@@ -351,34 +340,61 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
   }
 
   const applyDayEnd = (entries: ResolutionEntry[]) => {
-    const resolvedIds = new Set(entries.filter(e => e.outcome !== 'expired').map(e => e.event.id))
-    const expiredIds  = new Set(entries.filter(e => e.outcome === 'expired').map(e => e.event.id))
+    const allResolvedIds = new Set(entries.map(e => e.event.id))
+    const nextDay = currentDay + 1
 
-    setMapNodes(prev => prev.map(node => ({
-      ...node,
-      events: node.events
-        .map(ev => {
-          if (resolvedIds.has(ev.id))
-            return { ...ev, isCompleted: true, inProgress: false, resolveOnDay: null, assignedScroll: null, slots: ev.slots.map(s => ({ ...s, assignedAgentId: null })) }
-          if (expiredIds.has(ev.id))
-            return { ...ev, isExpired: true }
-          // Still-active in-progress events: no countdown change (resolveOnDay is absolute)
-          if (ev.inProgress) return ev
-          if (ev.daysRemaining !== null) {
-            const next = ev.daysRemaining - 1
-            return next <= 0 ? { ...ev, isExpired: true } : { ...ev, daysRemaining: next }
-          }
-          return ev
+    // 1. Record resolutions in the event state machine
+    setEventStates(prev => {
+      const next = new Map(prev)
+      for (const e of entries) {
+        const resolution: ResolutionType = e.outcome === 'expired' ? 'expired'
+          : e.rollResult?.isCriticalSuccess ? 'criticalSuccess'
+          : e.rollResult?.isCriticalFailure ? 'criticalFailure'
+          : e.success ? 'success' : 'failure'
+        const existing = next.get(e.event.id)
+        next.set(e.event.id, {
+          defId: e.event.id,
+          state: 'resolved',
+          resolution,
+          choiceId: existing?.choiceId,
+          dayPlaced: existing?.dayPlaced,
+          dayResolved: currentDay,
         })
-        .filter(ev => !ev.isCompleted),
-    })))
+      }
+      return next
+    })
 
-    setCurrentDay(d => d + 1)
+    // 2. Clean map using shared utility (handles timer expiry too)
+    const { nodes: cleanedNodes, expiredIds } = advanceDayOnMap(mapNodes, allResolvedIds, currentDay)
+    setMapNodes(cleanedNodes)
+
+    // 3. Record any timer-expired events in state
+    if (expiredIds.length > 0) {
+      setEventStates(prev => {
+        const next = new Map(prev)
+        for (const id of expiredIds) {
+          next.set(id, { defId: id, state: 'resolved', resolution: 'expired', dayResolved: currentDay })
+        }
+        return next
+      })
+    }
+
+    // 4. Advance day
+    setCurrentDay(nextDay)
     setResolutionQueue([])
     setResolutionIndex(0)
     setResolutionResults([])
-    logEvent(`day:complete — Day ${currentDay + 1} begins`)
+    logEvent(`day:complete — Day ${nextDay} begins`)
   }
+
+  // Spawn new events when day changes
+  useEffect(() => {
+    if (currentDay <= 1) return
+    runPoolDraw()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDay])
+
+  // DEFS_BY_ID imported from @modules/events for definition lookups
 
   // Probability shown pre-roll: no golden dice (they're a post-roll choice)
   const passProbability = passChance(diceConfig.pool, diceConfig.threshold, diceConfig.difficulty, 0)
@@ -396,8 +412,8 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
         {/* Module selector */}
         <div className="p-4 border-b border-silk/20">
           <label className="text-xs uppercase tracking-wider text-silk/50 block mb-2">Module</label>
-          <div className="flex gap-1">
-            {(['dice', 'map', 'characters', 'inventory'] as ActiveModule[]).map((m) => (
+          <div className="flex gap-1 flex-wrap">
+            {(['dice', 'map', 'characters', 'inventory', 'events'] as ActiveModule[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setActiveModule(m)}
@@ -438,6 +454,8 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
                 else next.add(id)
                 return next
               })}
+              activeStorylineIds={activeStorylineIds}
+              onToggleStoryline={handleToggleStoryline}
             />
           )}
           {activeModule === 'characters' && (
@@ -464,7 +482,7 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
       <main className="flex-1 flex flex-col overflow-hidden">
 
         {/* Module preview */}
-        <div className={`flex-1 overflow-auto ${activeModule === 'map' ? '' : 'p-6'}`}>
+        <div className={`flex-1 overflow-auto ${activeModule === 'map' || activeModule === 'events' ? '' : 'p-6'}`}>
           {activeModule === 'dice' && (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between">
@@ -503,18 +521,19 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
           )}
 
           {activeModule === 'map' && (
-            <Map
+            <PalaceMap
               nodes={mapNodes}
               agents={availableAgents}
               allAgents={agents}
               selectedNodeId={selectedNodeId}
               onNodeClick={(id) => setSelectedNodeId(prev => prev === id ? null : id)}
               onSlotAssign={handleSlotAssign}
-              onScrollAssign={handleScrollAssign}
+              onIntelAssign={handleIntelAssign}
+              onCommitEvent={handleCommitEvent}
+              onCancelCommit={handleCancelCommit}
               onEndDay={handleEndDay}
               currentDay={currentDay}
               goldenDice={goldenDiceAvailable}
-              intelligenceScrolls={intelligenceScrolls}
             />
           )}
 
@@ -535,6 +554,15 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
               onAgentSelect={handleAgentSelect}
               onEquip={handleEquip}
               onUnequip={handleUnequip}
+            />
+          )}
+
+          {activeModule === 'events' && (
+            <StorylineEditor
+              currentDay={currentDay}
+              eventStates={eventStates}
+              activeStorylineIds={activeStorylineIds}
+              onToggleStoryline={handleToggleStoryline}
             />
           )}
         </div>
@@ -564,6 +592,17 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
           goldenDiceAvailable={goldenDiceAvailable}
           onSettled={handleResolutionSettled}
           onNext={handleResolutionNext}
+          onDilemmaChoice={(eventDefId, choiceId) => {
+            // Record the choice in the event's runtime state
+            setEventStates(prev => {
+              const next = new Map(prev)
+              const existing = next.get(eventDefId)
+              if (existing) {
+                next.set(eventDefId, { ...existing, choiceId })
+              }
+              return next
+            })
+          }}
         />
       )}
     </div>
@@ -575,7 +614,7 @@ export function Playground({ activeModule: initialModule = 'dice', showEventLog 
 // ---------------------------------------------------------------------------
 
 function ResolutionModal({ item, index, total, difficulty, nextDay,
-    goldenDiceAvailable, onSettled, onNext }: {
+    goldenDiceAvailable, onSettled, onNext, onDilemmaChoice }: {
   item: ResolutionQueueItem
   index: number
   total: number
@@ -584,17 +623,29 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
   goldenDiceAvailable: number
   onSettled: (r: DiceRollResult) => void
   onNext: (r?: DiceRollResult, spent?: { golden: number }) => void
+  onDilemmaChoice?: (eventDefId: string, choiceId: string) => void
 }) {
   const [rollConfig, setRollConfig] = useState<DiceRollConfig | null>(null)
   const [rollResult, setRollResult] = useState<DiceRollResult | null>(null)
   const [goldenSpent, setGoldenSpent] = useState(0)
   const isLast = index === total - 1
 
-  const triggerRoll = (pool: number) => {
+  // Dilemma state
+  const def = item.defId ? DEFS_BY_ID[item.defId] : undefined
+  const dilemma = def?.dilemma
+  const showDilemmaBefore = dilemma && dilemma.timing === 'before-roll'
+  const showDilemmaStandalone = dilemma && dilemma.timing === 'standalone'
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null)
+  const selectedChoice = dilemma?.choices.find(c => c.id === selectedChoiceId)
+
+  // Effective threshold/pool accounting for choice overrides
+  const effectiveThreshold = selectedChoice?.overrideThreshold ?? item.event.threshold
+
+  const triggerRoll = (pool: number, threshold?: number) => {
     setRollResult(null)
     setRollConfig({
       pool,
-      threshold: item.event.threshold,
+      threshold: threshold ?? effectiveThreshold,
       tier: item.tier,
       difficulty,
       goldenDice: 0,
@@ -605,11 +656,12 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
   useEffect(() => {
     setRollResult(null)
     setGoldenSpent(0)
-    if (!item.isExpired) {
+    setSelectedChoiceId(null)
+    // Auto-trigger roll only if no dilemma (or dilemma is after-roll)
+    if (!item.isExpired && !showDilemmaBefore && !showDilemmaStandalone) {
       const t = setTimeout(() => triggerRoll(item.pool), 200)
       return () => clearTimeout(t)
     }
-  // item.pool and item.isExpired both come from the resolved item snapshot; re-run if event changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.event.id, item.pool, item.isExpired])
 
@@ -622,9 +674,9 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
     return {
       ...rollResult,
       successes,
-      isSuccess: successes >= item.event.threshold,
+      isSuccess: successes >= effectiveThreshold,
       isCriticalFailure: false,
-      margin: successes - item.event.threshold,
+      margin: successes - effectiveThreshold,
     }
   })() : null
 
@@ -637,6 +689,24 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
     onNext(effectiveResult ?? undefined, { golden: goldenSpent })
   }
 
+  const handleChoicePick = (choiceId: string) => {
+    setSelectedChoiceId(choiceId)
+    const choice = dilemma?.choices.find(c => c.id === choiceId)
+    if (dilemma) {
+      onDilemmaChoice?.(item.defId ?? item.event.id, choiceId)
+    }
+    if (choice?.skipDiceRoll) {
+      // Standalone resolution — create a synthetic success result
+      // and proceed directly
+    } else {
+      // Trigger roll with overridden stats (pool stays same for now, threshold may change)
+      setTimeout(() => triggerRoll(item.pool, choice?.overrideThreshold), 200)
+    }
+  }
+
+  // Dilemma choice selection phase
+  const needsChoiceFirst = (showDilemmaBefore || showDilemmaStandalone) && !selectedChoiceId
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(5,3,1,0.88)' }}>
       <div className="w-full max-w-lg mx-4 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
@@ -646,10 +716,18 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
         <div className="px-5 py-3 border-b border-silk/10 flex-shrink-0">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[9px] uppercase tracking-widest text-silk/35">{index + 1} / {total}</span>
-            <span className="text-[8px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
-              style={{ background: `${uc.badge}22`, color: uc.badge }}>
-              {URGENCY_LABEL[item.event.urgency]}
-            </span>
+            <div className="flex items-center gap-2">
+              {dilemma && (
+                <span className="text-[8px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
+                  style={{ background: 'rgba(255,180,0,0.15)', color: 'rgba(255,180,0,0.8)' }}>
+                  Dilemma
+                </span>
+              )}
+              <span className="text-[8px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
+                style={{ background: `${uc.badge}22`, color: uc.badge }}>
+                {URGENCY_LABEL[item.event.urgency]}
+              </span>
+            </div>
           </div>
           <h2 className="font-serif text-lg text-parchment leading-tight">{item.event.title}</h2>
           <p className="text-[10px] text-silk/40 mt-0.5 leading-relaxed line-clamp-2">{item.event.description}</p>
@@ -665,12 +743,111 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
               {isLast ? `Begin Day ${nextDay} →` : 'Next →'}
             </button>
           </div>
+        ) : needsChoiceFirst ? (
+          /* ── Dilemma choice phase ── */
+          <div className="px-5 py-4 overflow-y-auto flex-1">
+            <p className="text-[11px] text-silk/60 leading-relaxed mb-4 italic font-serif">{dilemma!.prompt}</p>
+            <div className="space-y-2">
+              {dilemma!.choices.map(choice => (
+                <button key={choice.id}
+                  className="w-full text-left rounded-lg p-3 transition-all hover:brightness-125"
+                  style={{
+                    background: 'rgba(255,180,0,0.05)',
+                    border: '1px solid rgba(255,180,0,0.2)',
+                  }}
+                  onClick={() => handleChoicePick(choice.id)}>
+                  <div className="font-serif text-[12px] font-semibold" style={{ color: 'rgba(255,200,60,0.9)' }}>
+                    {choice.label}
+                  </div>
+                  <div className="text-[9px] text-silk/45 mt-1 leading-relaxed">{choice.description}</div>
+
+                  <div className="flex gap-1.5 flex-wrap mt-2">
+                    {choice.overrideStats && (
+                      <span className="text-[7px] px-1.5 py-0.5 rounded"
+                        style={{ background: 'rgba(120,180,255,0.12)', color: 'rgba(120,180,255,0.75)' }}>
+                        {choice.overrideStats.map(s => STAT_LABELS[s].en).join(' + ')}
+                        {choice.overrideThreshold != null && ` ≥ ${choice.overrideThreshold}✓`}
+                      </span>
+                    )}
+                    {choice.skipDiceRoll && (
+                      <span className="text-[7px] px-1.5 py-0.5 rounded"
+                        style={{ background: 'rgba(180,120,255,0.12)', color: 'rgba(180,120,255,0.75)' }}>
+                        no dice roll
+                      </span>
+                    )}
+                    {choice.moralWeight && Object.entries(choice.moralWeight).filter(([,v]) => v !== 0).map(([k, v]) => (
+                      <span key={k} className="text-[7px] px-1.5 py-0.5 rounded"
+                        style={{
+                          background: (v as number) > 0 ? 'rgba(0,180,100,0.12)' : 'rgba(220,60,60,0.12)',
+                          color: (v as number) > 0 ? 'rgba(0,200,120,0.75)' : 'rgba(220,80,80,0.75)',
+                        }}>
+                        {k} {(v as number) > 0 ? '+' : ''}{v as number}
+                      </span>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : selectedChoice?.skipDiceRoll ? (
+          /* ── Standalone dilemma — no dice, just show choice result ── */
+          <div className="px-5 py-8 flex flex-col items-center gap-3">
+            <div className="text-[11px] text-silk/50 italic font-serif text-center max-w-xs">
+              "{selectedChoice.label}"
+            </div>
+            {selectedChoice.immediateConsequences?.map((c, i) => (
+              c.kind === 'narrative' && (
+                <div key={i} className="text-[10px] text-silk/40 italic text-center">{c.text}</div>
+              )
+            ))}
+            {selectedChoice.moralWeight && (
+              <div className="flex gap-2 mt-2">
+                {Object.entries(selectedChoice.moralWeight).filter(([,v]) => v !== 0).map(([k, v]) => (
+                  <span key={k} className="text-[9px] px-2 py-1 rounded"
+                    style={{
+                      background: (v as number) > 0 ? 'rgba(0,180,100,0.1)' : 'rgba(220,60,60,0.1)',
+                      border: `1px solid ${(v as number) > 0 ? 'rgba(0,180,100,0.3)' : 'rgba(220,60,60,0.3)'}`,
+                      color: (v as number) > 0 ? 'rgba(0,200,120,0.8)' : 'rgba(220,80,80,0.8)',
+                    }}>
+                    {k} {(v as number) > 0 ? '+' : ''}{v as number}
+                  </span>
+                ))}
+              </div>
+            )}
+            <button onClick={() => {
+              // Create synthetic success result for standalone choices
+              const syntheticResult: DiceRollResult = {
+                dice: [], successes: 1, isSuccess: true,
+                isCriticalSuccess: false, isCriticalFailure: false, margin: 1,
+              }
+              onNext(syntheticResult, { golden: 0 })
+            }}
+              className="mt-4 px-5 py-2 rounded-lg text-sm font-serif font-semibold transition-all hover:brightness-125"
+              style={{
+                background: isLast ? 'rgba(255,215,0,0.15)' : 'rgba(232,213,176,0.1)',
+                border: `1px solid ${isLast ? 'rgba(255,215,0,0.4)' : 'rgba(232,213,176,0.2)'}`,
+                color: isLast ? 'rgba(255,215,0,0.9)' : 'rgba(232,213,176,0.7)',
+              }}>
+              {isLast ? `Begin Day ${nextDay} →` : 'Next →'}
+            </button>
+          </div>
         ) : (
           <>
+            {/* Chosen approach indicator */}
+            {selectedChoice && (
+              <div className="px-5 py-2 border-b border-silk/10 flex-shrink-0"
+                style={{ background: 'rgba(255,180,0,0.04)' }}>
+                <div className="text-[8px] uppercase tracking-widest text-silk/30 mb-0.5">Chosen approach</div>
+                <div className="text-[11px] font-serif" style={{ color: 'rgba(255,200,60,0.8)' }}>
+                  {selectedChoice.label}
+                </div>
+              </div>
+            )}
+
             {/* Stat breakdown */}
             <div className="px-5 py-3 border-b border-silk/10 flex-shrink-0">
               <div className="flex items-start gap-4 flex-wrap">
-                {item.event.statsChecked.map(stat => (
+                {(selectedChoice?.overrideStats ?? item.event.statsChecked).map(stat => (
                   <div key={stat} className="min-w-[60px]">
                     <div className="text-[8px] uppercase tracking-widest text-silk/35 mb-1">{STAT_LABELS[stat].en}</div>
                     <div className="text-xl font-bold" style={{ color: uc.badge }}>{item.statTotals[stat] ?? 0}</div>
@@ -687,7 +864,7 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
                 <div className="ml-auto text-right border-l border-silk/10 pl-4">
                   <div className="text-[8px] uppercase tracking-widest text-silk/35 mb-1">Dice Pool</div>
                   <div className="text-xl font-bold text-parchment">{item.pool}d</div>
-                  <div className="text-[9px] text-silk/35">need {item.event.threshold}✓</div>
+                  <div className="text-[9px] text-silk/35">need {effectiveThreshold}✓</div>
                   {item.event.oppositionValue > 0 && (
                     <div className="text-[8px] text-red-400/55 mt-0.5">−{item.event.oppositionValue} opp</div>
                   )}
@@ -722,7 +899,7 @@ function ResolutionModal({ item, index, total, difficulty, nextDay,
                       {effectiveResult.isSuccess ? '✓ Success' : '✗ Failed'}
                     </div>
                     <div className="text-[10px] text-silk/40 mt-0.5">
-                      {effectiveResult.successes} of {item.event.threshold} needed
+                      {effectiveResult.successes} of {effectiveThreshold} needed
                       {effectiveResult.margin !== 0 && (
                         <span style={{ color: effectiveResult.margin > 0 ? '#00a86b88' : '#e0403088' }}>
                           {' '}({effectiveResult.margin > 0 ? '+' : ''}{effectiveResult.margin})
@@ -842,13 +1019,15 @@ function DiceControls({
   )
 }
 
-function MapControls({ selectedNodeId, currentDay, isResolutionOpen, agents, availableAgentIds, onToggleAgent }: {
+function MapControls({ selectedNodeId, currentDay, isResolutionOpen, agents, availableAgentIds, onToggleAgent, activeStorylineIds, onToggleStoryline }: {
   selectedNodeId: LocationId | null
   currentDay: number
   isResolutionOpen: boolean
   agents: Agent[]
   availableAgentIds: Set<string>
   onToggleAgent: (id: string) => void
+  activeStorylineIds: Set<string>
+  onToggleStoryline: (id: string) => void
 }) {
   return (
     <div className="text-xs space-y-4">
@@ -866,6 +1045,36 @@ function MapControls({ selectedNodeId, currentDay, isResolutionOpen, agents, ava
           <div className="text-parchment/65 font-mono text-[10px]">{selectedNodeId}</div>
         </div>
       )}
+
+      {/* Active storylines */}
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-silk/30 mb-2">Active Storylines</div>
+        <div className="space-y-1 max-h-32 overflow-y-auto">
+          {ALL_STORYLINES.map(sl => {
+            const hasDilemma = ALL_EVENT_DEFINITIONS
+              .filter(d => sl.eventIds.includes(d.id))
+              .some(d => d.dilemma)
+            return (
+              <label key={sl.id} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={activeStorylineIds.has(sl.id)}
+                  onChange={() => onToggleStoryline(sl.id)}
+                  className="accent-gold"
+                />
+                <span className="text-silk/65 leading-tight truncate flex-1">{sl.title}</span>
+                {hasDilemma && (
+                  <span className="text-[7px] px-1 rounded flex-shrink-0"
+                    style={{ background: 'rgba(255,180,0,0.15)', color: 'rgba(255,180,0,0.7)', border: '1px solid rgba(255,180,0,0.25)' }}>
+                    dilemma
+                  </span>
+                )}
+                <span className="text-silk/25 text-[8px] flex-shrink-0">{sl.eventIds.length}ev</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
 
       <div>
         <div className="text-[10px] uppercase tracking-widest text-silk/30 mb-2">Available Agents</div>

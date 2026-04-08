@@ -4,10 +4,10 @@
 // Playground (or the future game store) can apply.
 // =============================================================================
 
-import type { Consequence } from '@core/types'
+import type { Consequence, IntelligenceType } from '@core/types'
 
 export interface ConsequencePatch {
-  scrollsToAdd: import('@core/types').IntelligenceScroll[]
+  intelligenceToAdd: Array<{ type: IntelligenceType; amount: number }>
   goldenDiceDelta: number
   rerollsDelta: number
   conditionsToApply: Array<{ agentId: string; condition: import('@core/types').AgentCondition }>
@@ -20,7 +20,7 @@ export interface ConsequencePatch {
 /** TODO: implement fully — returns empty patch for now */
 export function applyConsequences(_consequences: Consequence[]): ConsequencePatch {
   return {
-    scrollsToAdd: [],
+    intelligenceToAdd: [],
     goldenDiceDelta: 0,
     rerollsDelta: 0,
     conditionsToApply: [],

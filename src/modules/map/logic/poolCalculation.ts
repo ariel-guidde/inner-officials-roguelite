@@ -1,26 +1,11 @@
 // =============================================================================
 // map/logic/poolCalculation.ts
-// Pure functions for computing dice pool from agents, opposition, and scrolls.
-// Shared between Map.tsx (preview) and Playground.tsx (resolution).
+// Pure functions for computing dice pool from agents, opposition, and intelligence.
 // =============================================================================
 
-import type { Agent, GameEvent, IntelligenceScroll, StatName } from '@core/types'
-import { INTELLIGENCE_MATCHING_STATS } from '@core/types'
+import type { Agent, GameEvent } from '@core/types'
+import { intelligenceBonusDice } from '@core/types'
 import { applyEquipmentBonuses } from '@modules/characters'
-
-/**
- * Bonus dice from an intelligence scroll, given the stats the event checks.
- * +2 for jade tier on a stat match, +1 for any other tier, 0 if no match or no scroll.
- */
-export function scrollBonusDice(
-  scroll: IntelligenceScroll | null,
-  statsChecked: readonly StatName[],
-): number {
-  if (!scroll) return 0
-  const matches = INTELLIGENCE_MATCHING_STATS[scroll.type].some(s => statsChecked.includes(s))
-  if (!matches) return 0
-  return scroll.tier === 'jade' ? 2 : 1
-}
 
 /**
  * Total dice pool for an event given the assigned agents.
@@ -28,7 +13,7 @@ export function scrollBonusDice(
  */
 export function computeEventPool(
   assignedAgents: Agent[],
-  event: Pick<GameEvent, 'slots' | 'statsChecked' | 'oppositionValue' | 'assignedScroll'>,
+  event: Pick<GameEvent, 'slots' | 'statsChecked' | 'oppositionValue' | 'assignedIntelligence' | 'type'>,
 ): number | null {
   const hasSlots = event.slots.length > 0
   if (hasSlots && assignedAgents.length === 0) return null
@@ -42,5 +27,5 @@ export function computeEventPool(
         }, 0)
       ) - event.oppositionValue
 
-  return Math.max(0, base + scrollBonusDice(event.assignedScroll, event.statsChecked))
+  return Math.max(0, base + intelligenceBonusDice(event.assignedIntelligence, event.type))
 }

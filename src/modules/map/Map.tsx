@@ -5,10 +5,12 @@
 import { useState, useMemo, useEffect } from 'react'
 import type {
   Agent,
+  AgentTier,
   DayPhase,
   EventSlot,
   GameEvent,
-  IntelligenceScroll,
+  IntelligenceItem,
+  IntelligenceType,
   LocationId,
   MapNodeData,
 } from '@core/types'
@@ -18,13 +20,20 @@ import {
   STAT_LABELS,
   AGENT_TIER_COLORS,
   AGENT_TIER_NAMES,
+  AGENT_TIER_ORDER,
   BLOCKING_CONDITIONS,
   CONDITION_ICONS,
   CONDITION_LABELS,
   EQUIPMENT_SLOT_ICONS,
   EQUIPMENT_SLOT_LABELS,
   INTELLIGENCE_LABELS,
-  INTELLIGENCE_MATCHING_STATS,
+  INTELLIGENCE_EVENT_MATCH,
+  INTEL_TIER_BONUS,
+  INTELLIGENCE_COLORS,
+  INTELLIGENCE_ICONS,
+  ALL_INTELLIGENCE_TYPES,
+  intelligenceTypeTotal,
+  type IntelligenceStore,
 } from '@core/types'
 import { TIER_THEME, cardBorderStyle, applyEquipmentBonuses } from '@modules/characters'
 import { getPortrait } from '@modules/characters'
@@ -37,7 +46,7 @@ import {
   assignedAgentIds,
   agentMeetsSlot,
 } from './logic/eventUtils'
-import { computeEventPool, scrollBonusDice } from './logic/poolCalculation'
+import { computeEventPool } from './logic/poolCalculation'
 
 // ---------------------------------------------------------------------------
 // Static constants
@@ -88,14 +97,16 @@ export interface MapProps {
   selectedNodeId?: LocationId | null
   onNodeClick: (locationId: LocationId) => void
   onSlotAssign?: (eventId: string, slotId: string, agentId: string | null) => void
-  onScrollAssign?: (eventId: string, scroll: IntelligenceScroll | null) => void
+  onIntelAssign?: (eventId: string, intelItem: IntelligenceItem | null) => void
+  onCommitEvent?: (eventId: string) => void
+  onCancelCommit?: (eventId: string) => void
   onEndDay?: () => void
   currentDay?: number
   dayPhase?: DayPhase
   showDebugOverlay?: boolean
   highlightedNodeId?: LocationId | null
-  /** Intelligence scrolls — named, tiered, stat-typed card objects in the hand. */
-  intelligenceScrolls?: IntelligenceScroll[]
+  /** Intelligence as counted resource. Shown in header and available for event assignment. */
+  intelligence?: IntelligenceStore
   /** Golden dice count — add auto-successes to a settled roll. */
   goldenDice?: number
 }
@@ -112,7 +123,6 @@ interface PendingSlot {
 
 type InspectedCard =
   | { kind: 'agent'; agent: Agent }
-  | { kind: 'scroll'; scroll: IntelligenceScroll }
 
 // ---------------------------------------------------------------------------
 // Map (root component)
@@ -125,20 +135,20 @@ export function Map({
   selectedNodeId,
   onNodeClick,
   onSlotAssign,
-  onScrollAssign,
+  onIntelAssign,
+  onCommitEvent,
+  onCancelCommit,
   onEndDay,
   currentDay = 1,
   showDebugOverlay = false,
   highlightedNodeId,
-  intelligenceScrolls = [],
+  intelligence,
   goldenDice = 0,
 }: MapProps) {
   const [pendingSlot, setPendingSlot] = useState<PendingSlot | null>(null)
   const [inspectedCard, setInspectedCard] = useState<InspectedCard | null>(null)
-  // When set, the next scroll clicked in the hand is assigned to this event
-  const [pendingScrollEventId, setPendingScrollEventId] = useState<string | null>(null)
 
-  useEffect(() => { setPendingSlot(null); setPendingScrollEventId(null) }, [selectedNodeId])
+  useEffect(() => { setPendingSlot(null) }, [selectedNodeId])
 
   const assigned = useMemo(() => assignedAgentIds(nodes), [nodes])
 
@@ -167,12 +177,6 @@ export function Map({
     setPendingSlot(null)
   }
 
-  const handleScrollPick = (scroll: IntelligenceScroll) => {
-    if (!pendingScrollEventId || !onScrollAssign) return
-    onScrollAssign(pendingScrollEventId, scroll)
-    setPendingScrollEventId(null)
-  }
-
   // Merged agent roster: allAgents takes precedence over agents for lookup
   const agentById = useMemo(() => {
     const map: Record<string, Agent> = {}
@@ -188,12 +192,24 @@ export function Map({
         readyCount={readyCount}
         onEndDay={onEndDay}
         goldenDice={goldenDice}
-        intelligenceScrollCount={intelligenceScrolls.length}
+        intelligence={intelligence}
       />
 
       <div className="flex flex-1 min-h-0">
         {/* Map canvas */}
-        <div className="relative flex-1 min-w-0 overflow-hidden" style={{ background: '#0a0604' }}>
+        <div className="relative flex-1 min-w-0 overflow-hidden" style={{
+          background: 'radial-gradient(ellipse at 50% 40%, #1a150e 0%, #0d0a06 50%, #050302 100%)',
+        }}>
+          {/* Parchment texture overlay */}
+          <div className="absolute inset-0 pointer-events-none" style={{
+            backgroundImage: `
+              radial-gradient(ellipse at 20% 30%, rgba(196,149,106,0.04) 0%, transparent 50%),
+              radial-gradient(ellipse at 80% 60%, rgba(196,149,106,0.03) 0%, transparent 40%),
+              radial-gradient(ellipse at 50% 80%, rgba(196,149,106,0.02) 0%, transparent 60%)
+            `,
+          }} />
+
+          {/* Path lines between locations */}
           <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
             {EDGES.map(([a, b]) => {
               const la = LOCATION_LAYOUT[a]; const lb = LOCATION_LAYOUT[b]
@@ -201,7 +217,7 @@ export function Map({
                 <line key={`${a}-${b}`}
                   x1={`${la.x}%`} y1={`${la.y}%`}
                   x2={`${lb.x}%`} y2={`${lb.y}%`}
-                  stroke="rgba(232,213,176,0.12)" strokeWidth="1" />
+                  stroke="rgba(196,149,106,0.08)" strokeWidth="1" strokeDasharray="4 6" />
               )
             })}
           </svg>
@@ -238,26 +254,24 @@ export function Map({
             agentById={agentById}
             assigned={assigned}
             pendingSlot={pendingSlot}
-            pendingScrollEventId={pendingScrollEventId}
             onClose={() => onNodeClick(selectedNode.id)}
             onSetPendingSlot={setPendingSlot}
-            onSetPendingScrollEventId={setPendingScrollEventId}
             onSlotAssign={onSlotAssign}
-            onScrollAssign={onScrollAssign}
+            onIntelAssign={onIntelAssign}
+            onCommitEvent={onCommitEvent}
+            onCancelCommit={onCancelCommit}
+            intelligence={intelligence}
+            currentDay={currentDay}
           />
         )}
       </div>
 
       <AgentHand
         agents={agents}
-        intelligenceScrolls={intelligenceScrolls}
         assigned={assigned}
         pendingSlot={pendingSlot}
-        pendingScrollEventId={pendingScrollEventId}
         onAgentPick={handleAgentPick}
         onCancelPick={() => setPendingSlot(null)}
-        onScrollPick={handleScrollPick}
-        onCancelScrollPick={() => setPendingScrollEventId(null)}
         onInspect={setInspectedCard}
       />
 
@@ -273,9 +287,9 @@ export function Map({
 // DayHeader
 // ---------------------------------------------------------------------------
 
-function DayHeader({ currentDay, readyCount, onEndDay, goldenDice, intelligenceScrollCount }: {
+function DayHeader({ currentDay, readyCount, onEndDay, goldenDice, intelligence }: {
   currentDay: number; readyCount: number; onEndDay?: () => void
-  goldenDice: number; intelligenceScrollCount: number
+  goldenDice: number; intelligence?: IntelligenceStore
 }) {
   return (
     <div className="flex items-center gap-3 px-4 flex-shrink-0"
@@ -285,38 +299,48 @@ function DayHeader({ currentDay, readyCount, onEndDay, goldenDice, intelligenceS
 
       {/* Resource counters */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        <ResourcePip icon="🌕" count={goldenDice} label="Golden Dice" />
-        <ResourcePip icon="🃏" count={intelligenceScrollCount} label="Intelligence Scrolls" />
+        <ResourcePip icon="🌕" count={goldenDice} label="Golden Dice" color="#ffd700" />
+        {intelligence && ALL_INTELLIGENCE_TYPES.map(type => {
+          const count = intelligenceTypeTotal(intelligence, type)
+          if (count <= 0) return null
+          return (
+            <ResourcePip key={type} icon={INTELLIGENCE_ICONS[type]} count={count}
+              label={INTELLIGENCE_LABELS[type]} color={INTELLIGENCE_COLORS[type]} />
+          )
+        })}
       </div>
 
       <div className="flex-1" />
 
-      {/* Continue button */}
+      {/* End Day button — prominent */}
       <button onClick={onEndDay}
-        className="px-3 py-0.5 rounded text-xs font-serif transition-all flex-shrink-0"
+        className="px-5 py-1.5 rounded-lg font-serif text-sm font-semibold transition-all flex-shrink-0"
         style={{
-          background: readyCount > 0 ? 'rgba(255,215,0,0.15)' : 'rgba(232,213,176,0.07)',
-          border: `1px solid ${readyCount > 0 ? 'rgba(255,215,0,0.5)' : 'rgba(232,213,176,0.18)'}`,
-          color: readyCount > 0 ? 'rgba(255,215,0,0.95)' : 'rgba(232,213,176,0.45)',
-          boxShadow: readyCount > 0 ? '0 0 8px rgba(255,215,0,0.25)' : 'none',
+          background: readyCount > 0
+            ? 'linear-gradient(135deg, rgba(255,215,0,0.2) 0%, rgba(200,160,0,0.15) 100%)'
+            : 'rgba(232,213,176,0.05)',
+          border: `1px solid ${readyCount > 0 ? 'rgba(255,215,0,0.5)' : 'rgba(232,213,176,0.12)'}`,
+          color: readyCount > 0 ? 'rgba(255,215,0,0.95)' : 'rgba(232,213,176,0.35)',
+          boxShadow: readyCount > 0 ? '0 0 12px rgba(255,215,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
         }}>
-        {readyCount > 0 ? `Continue → (${readyCount} ready)` : 'Continue →'}
+        {readyCount > 0 ? `End Day (${readyCount} ready)` : 'End Day'}
       </button>
     </div>
   )
 }
 
-function ResourcePip({ icon, count, label }: { icon: string; count: number; label: string }) {
+function ResourcePip({ icon, count, label, color }: { icon: string; count: number; label: string; color?: string }) {
+  const c = color ?? '#ffd700'
   return (
     <div className="flex items-center gap-1 px-2 py-0.5 rounded"
       title={label}
       style={{
-        background: count > 0 ? 'rgba(255,215,0,0.08)' : 'rgba(232,213,176,0.04)',
-        border: `1px solid ${count > 0 ? 'rgba(255,215,0,0.25)' : 'rgba(232,213,176,0.1)'}`,
+        background: count > 0 ? `${c}14` : 'rgba(232,213,176,0.04)',
+        border: `1px solid ${count > 0 ? `${c}40` : 'rgba(232,213,176,0.1)'}`,
       }}>
       <span style={{ fontSize: 10 }}>{icon}</span>
       <span className="text-[10px] font-semibold tabular-nums"
-        style={{ color: count > 0 ? 'rgba(255,215,0,0.85)' : 'rgba(232,213,176,0.25)' }}>
+        style={{ color: count > 0 ? `${c}dd` : 'rgba(232,213,176,0.25)' }}>
         {count}
       </span>
     </div>
@@ -439,11 +463,11 @@ function MapNode({ node, isSelected, isHighlighted, currentDay, onClick, style }
       onClick={isInteractable ? onClick : undefined}>
       {/* Node circle */}
       <div className="flex items-center justify-center transition-all" style={{
-        width: 44, height: 44, borderRadius: '50%',
-        background: nodeBg,
+        width: 56, height: 56, borderRadius: '50%',
+        background: `radial-gradient(circle at 40% 35%, ${nodeBg}, rgba(10,6,4,0.9))`,
         border: `2px solid ${ringColor}`,
-        boxShadow: nodeGlow,
-        fontSize: 20,
+        boxShadow: nodeGlow + (hasEvents && !isSelected ? `, 0 0 20px ${uc?.ring ?? 'transparent'}22` : ''),
+        fontSize: 24,
       }}>
         {icon}
       </div>
@@ -454,10 +478,31 @@ function MapNode({ node, isSelected, isHighlighted, currentDay, onClick, style }
         urgencyBadge={uc?.badge ?? null} hasActive={activeEvents.length > 0}
       />
 
-      <div className="text-center mt-1 leading-tight" style={{
-        fontSize: 8, maxWidth: 64,
-        color: isSelected ? 'rgba(255,215,0,0.9)' : 'rgba(232,213,176,0.6)',
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      {/* Event circles — one per active event */}
+      {activeEvents.length > 0 && (
+        <div className="flex gap-1 justify-center mt-1" style={{ minHeight: 8 }}>
+          {activeEvents.map(ev => {
+            const evUc = URGENCY_COLOR[ev.urgency]
+            const isReady = !ev.inProgress && ev.slots.filter(s => !s.npcAgentId && s.isMandatory).every(s => s.assignedAgentId != null) && ev.slots.some(s => s.isMandatory && !s.npcAgentId)
+            const circleColor = ev.inProgress ? IN_PROGRESS_COLOR.badge
+              : isReady ? IN_PROGRESS_COLOR.badge
+              : evUc.badge
+            return (
+              <div key={ev.id} style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: circleColor,
+                boxShadow: ev.inProgress ? `0 0 4px ${IN_PROGRESS_COLOR.glow}` : `0 0 3px ${circleColor}55`,
+                border: `1px solid ${circleColor}`,
+              }} />
+            )
+          })}
+        </div>
+      )}
+
+      <div className="text-center mt-1 leading-tight font-serif" style={{
+        fontSize: 9, maxWidth: 80,
+        color: isSelected ? 'rgba(255,215,0,0.9)' : hasEvents ? 'rgba(232,213,176,0.7)' : 'rgba(232,213,176,0.35)',
+        textShadow: '0 1px 3px rgba(0,0,0,0.8)',
       }}>
         {label}
       </div>
@@ -469,15 +514,17 @@ function MapNode({ node, isSelected, isHighlighted, currentDay, onClick, style }
 // EventSidebar
 // ---------------------------------------------------------------------------
 
-function EventSidebar({ node, agents, agentById, assigned, pendingSlot, pendingScrollEventId, onClose, onSetPendingSlot, onSetPendingScrollEventId, onSlotAssign, onScrollAssign }: {
+function EventSidebar({ node, agents, agentById, assigned, pendingSlot, onClose, onSetPendingSlot, onSlotAssign, onIntelAssign, onCommitEvent, onCancelCommit, intelligence, currentDay }: {
   node: MapNodeData; agents: Agent[]; agentById: Record<string, Agent>
   assigned: Set<string>; pendingSlot: PendingSlot | null
-  pendingScrollEventId: string | null
   onClose: () => void
   onSetPendingSlot: (ps: PendingSlot | null) => void
-  onSetPendingScrollEventId: (id: string | null) => void
   onSlotAssign?: (eventId: string, slotId: string, agentId: string | null) => void
-  onScrollAssign?: (eventId: string, scroll: IntelligenceScroll | null) => void
+  onIntelAssign?: (eventId: string, intelItem: IntelligenceItem | null) => void
+  onCommitEvent?: (eventId: string) => void
+  onCancelCommit?: (eventId: string) => void
+  intelligence?: IntelligenceStore
+  currentDay?: number
 }) {
   const activeEvents = node.events.filter(e => !e.isCompleted && !e.isExpired)
   const icon = LOCATION_ICONS[node.id]
@@ -491,10 +538,7 @@ function EventSidebar({ node, agents, agentById, assigned, pendingSlot, pendingS
         style={{ borderBottom: '1px solid rgba(232,213,176,0.10)' }}>
         <div className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: 16 }}>{icon}</span>
-          <div className="min-w-0">
-            <div className="text-xs font-serif text-parchment/90 truncate">{label.en}</div>
-            <div className="text-[9px] text-silk/35">{label.zh}</div>
-          </div>
+          <div className="text-xs font-serif text-parchment/90 truncate">{label.en}</div>
         </div>
         <button onClick={onClose} className="text-silk/30 hover:text-parchment/70 transition-colors flex-shrink-0 ml-2 text-sm leading-none">×</button>
       </div>
@@ -506,11 +550,13 @@ function EventSidebar({ node, agents, agentById, assigned, pendingSlot, pendingS
           activeEvents.map(ev => (
             <EventEntry key={ev.id} event={ev} agents={agents} agentById={agentById}
               assigned={assigned} pendingSlot={pendingSlot}
-              pendingScrollEventId={pendingScrollEventId}
               onSetPendingSlot={onSetPendingSlot}
-              onSetPendingScrollEventId={onSetPendingScrollEventId}
               onSlotAssign={onSlotAssign}
-              onScrollAssign={onScrollAssign} />
+              onIntelAssign={onIntelAssign}
+              onCommitEvent={onCommitEvent}
+              onCancelCommit={onCancelCommit}
+              intelligence={intelligence}
+              currentDay={currentDay} />
           ))
         )}
       </div>
@@ -522,21 +568,22 @@ function EventSidebar({ node, agents, agentById, assigned, pendingSlot, pendingS
 // EventEntry
 // ---------------------------------------------------------------------------
 
-function EventEntry({ event, agents, agentById, assigned, pendingSlot, pendingScrollEventId, onSetPendingSlot, onSetPendingScrollEventId, onSlotAssign, onScrollAssign }: {
+function EventEntry({ event, agents, agentById, assigned, pendingSlot, onSetPendingSlot, onSlotAssign, onIntelAssign, onCommitEvent, onCancelCommit, intelligence, currentDay }: {
   event: GameEvent; agents: Agent[]; agentById: Record<string, Agent>
   assigned: Set<string>; pendingSlot: PendingSlot | null
-  pendingScrollEventId: string | null
   onSetPendingSlot: (ps: PendingSlot | null) => void
-  onSetPendingScrollEventId: (id: string | null) => void
   onSlotAssign?: (eventId: string, slotId: string, agentId: string | null) => void
-  onScrollAssign?: (eventId: string, scroll: IntelligenceScroll | null) => void
+  onIntelAssign?: (eventId: string, intelItem: IntelligenceItem | null) => void
+  onCommitEvent?: (eventId: string) => void
+  onCancelCommit?: (eventId: string) => void
+  intelligence?: IntelligenceStore
+  currentDay?: number
 }) {
   const isLocked = event.inProgress
   const uc = isLocked ? IN_PROGRESS_COLOR : URGENCY_COLOR[event.urgency]
   const playerSlots = event.slots.filter(s => !s.npcAgentId)
   const mandatory = playerSlots.filter(s => s.isMandatory)
   const isReady = mandatory.length === 0 || mandatory.every(s => s.assignedAgentId != null)
-  const isScrollPending = pendingScrollEventId === event.id
 
   const assignedAgents = useMemo(
     () => playerSlots.filter(s => s.assignedAgentId).map(s => agentById[s.assignedAgentId!]).filter(Boolean),
@@ -628,47 +675,43 @@ function EventEntry({ event, agents, agentById, assigned, pendingSlot, pendingSc
         </div>
       )}
 
-      {/* Intelligence scroll slot */}
-      <div className="flex items-center gap-2 pt-1"
-        style={{ borderTop: '1px solid rgba(232,213,176,0.07)' }}>
-        <span className="text-[8px] uppercase tracking-widest text-silk/30 flex-shrink-0">Scroll:</span>
-        {event.assignedScroll ? (
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <div className="text-[9px] font-semibold truncate"
-              style={{ color: TIER_THEME[event.assignedScroll.tier].accent }}>
-              {INTELLIGENCE_LABELS[event.assignedScroll.type].en}
-            </div>
-            {!isLocked && (
-              <button onClick={() => onScrollAssign?.(event.id, null)}
-                className="text-[9px] text-silk/30 hover:text-red-400 transition-colors flex-shrink-0">×</button>
-            )}
-          </div>
-        ) : isLocked ? (
-          <span className="text-[9px] text-silk/20 italic">none</span>
-        ) : isScrollPending ? (
-          <button
-            className="text-[8px] px-1.5 py-0.5 rounded transition-all"
-            style={{ background: 'rgba(100,160,255,0.12)', border: '1px solid rgba(100,160,255,0.35)', color: 'rgba(130,180,255,0.8)' }}
-            onClick={() => onSetPendingScrollEventId(null)}>
-            Cancel
-          </button>
-        ) : (
-          <button
-            className="text-[8px] px-1.5 py-0.5 rounded transition-all hover:brightness-125"
-            style={{ background: 'rgba(232,213,176,0.06)', border: '1px solid rgba(232,213,176,0.15)', color: 'rgba(232,213,176,0.45)' }}
-            onClick={() => onSetPendingScrollEventId(event.id)}>
-            + Assign
-          </button>
-        )}
-      </div>
+      {/* Intelligence slot */}
+      <IntelligencePicker
+        event={event}
+        intelligence={intelligence}
+        isLocked={isLocked}
+        onAssign={(item) => onIntelAssign?.(event.id, item)}
+      />
 
-      {/* Ready indicator */}
-      <div className="text-[9px]">
-        {event.inProgress
-          ? <span style={{ color: IN_PROGRESS_COLOR.badge }}>⏳ In progress…</span>
-          : isReady
-          ? <span style={{ color: '#00a86b' }}>✓ Ready</span>
-          : <span className="text-silk/25">Assign agents…</span>}
+      {/* Status + commit/cancel */}
+      <div className="text-[9px] flex items-center gap-2">
+        {event.inProgress ? (
+          <span style={{ color: IN_PROGRESS_COLOR.badge }}>⏳ In progress…</span>
+        ) : event.committed ? (
+          <>
+            <span style={{ color: '#00a86b' }}>✓ Committed</span>
+            {event.committedOnDay === currentDay && onCancelCommit && (
+              <button onClick={() => onCancelCommit(event.id)}
+                className="px-1.5 py-0.5 rounded transition-all hover:brightness-125"
+                style={{ background: 'rgba(232,213,176,0.06)', border: '1px solid rgba(232,213,176,0.15)', color: 'rgba(232,213,176,0.45)' }}>
+                Cancel
+              </button>
+            )}
+          </>
+        ) : isReady ? (
+          <>
+            <span style={{ color: 'rgba(255,215,0,0.6)' }}>Ready</span>
+            {onCommitEvent && (
+              <button onClick={() => onCommitEvent(event.id)}
+                className="px-2 py-0.5 rounded font-semibold transition-all hover:brightness-125"
+                style={{ background: 'rgba(0,168,107,0.15)', border: '1px solid rgba(0,168,107,0.4)', color: '#00a86b' }}>
+                Commit
+              </button>
+            )}
+          </>
+        ) : (
+          <span className="text-silk/25">Assign agents…</span>
+        )}
       </div>
     </div>
   )
@@ -839,6 +882,127 @@ function SlotRequirements({ slot }: { slot: EventSlot }) {
 }
 
 // ---------------------------------------------------------------------------
+// IntelligencePicker — two-step: pick type → pick tier from available stock
+// ---------------------------------------------------------------------------
+
+function IntelligencePicker({ event, intelligence, isLocked, onAssign }: {
+  event: GameEvent
+  intelligence?: IntelligenceStore
+  isLocked: boolean
+  onAssign: (item: IntelligenceItem | null) => void
+}) {
+  const [expandedType, setExpandedType] = useState<IntelligenceType | null>(null)
+
+  // Reset expanded when intelligence changes
+  useEffect(() => { setExpandedType(null) }, [event.assignedIntelligence])
+
+  const assigned = event.assignedIntelligence
+  const isMatching = assigned ? INTELLIGENCE_EVENT_MATCH[assigned.type].includes(event.type) : false
+
+  return (
+    <div className="pt-1 space-y-1" style={{ borderTop: '1px solid rgba(232,213,176,0.07)' }}>
+      <span className="text-[8px] uppercase tracking-widest text-silk/30">Intelligence</span>
+
+      {/* Already assigned */}
+      {assigned ? (
+        <div className="flex items-center gap-1.5 rounded px-2 py-1"
+          style={{
+            background: `${INTELLIGENCE_COLORS[assigned.type]}12`,
+            border: `1px solid ${INTELLIGENCE_COLORS[assigned.type]}30`,
+          }}>
+          <span style={{ fontSize: 11 }}>{INTELLIGENCE_ICONS[assigned.type]}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[9px] font-semibold" style={{ color: INTELLIGENCE_COLORS[assigned.type] }}>
+              {INTELLIGENCE_LABELS[assigned.type]}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[8px]" style={{ color: AGENT_TIER_COLORS[assigned.tier] }}>
+                {AGENT_TIER_NAMES[assigned.tier]}
+              </span>
+              {isMatching && (
+                <span className="text-[7px] px-1 rounded"
+                  style={{ background: 'rgba(0,168,107,0.15)', color: '#00a86b' }}>
+                  +{INTEL_TIER_BONUS[assigned.tier]} dice
+                </span>
+              )}
+              {!isMatching && (
+                <span className="text-[7px] text-silk/25">no match</span>
+              )}
+            </div>
+          </div>
+          {!isLocked && (
+            <button onClick={() => onAssign(null)}
+              className="text-[9px] text-silk/30 hover:text-red-400 transition-colors flex-shrink-0">×</button>
+          )}
+        </div>
+      ) : isLocked ? (
+        <div className="text-[9px] text-silk/20 italic px-1">none</div>
+      ) : (
+        /* Type selection */
+        <div className="space-y-1">
+          {intelligence && ALL_INTELLIGENCE_TYPES.map(type => {
+            const total = intelligenceTypeTotal(intelligence, type)
+            if (total <= 0) return null
+            const isExpanded = expandedType === type
+            const matches = INTELLIGENCE_EVENT_MATCH[type].includes(event.type)
+
+            return (
+              <div key={type}>
+                <button
+                  className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-left transition-all"
+                  style={{
+                    background: isExpanded ? `${INTELLIGENCE_COLORS[type]}15` : `${INTELLIGENCE_COLORS[type]}08`,
+                    border: `1px solid ${isExpanded ? `${INTELLIGENCE_COLORS[type]}40` : `${INTELLIGENCE_COLORS[type]}18`}`,
+                  }}
+                  onClick={() => setExpandedType(isExpanded ? null : type)}>
+                  <span style={{ fontSize: 10 }}>{INTELLIGENCE_ICONS[type]}</span>
+                  <span className="text-[9px] font-semibold flex-1" style={{ color: INTELLIGENCE_COLORS[type] }}>
+                    {INTELLIGENCE_LABELS[type]}
+                  </span>
+                  {matches && <span className="text-[7px] px-1 rounded" style={{ background: 'rgba(0,168,107,0.12)', color: '#00a86b88' }}>match</span>}
+                  <span className="text-[8px] text-silk/30">{total}</span>
+                </button>
+
+                {/* Tier selection */}
+                {isExpanded && (
+                  <div className="flex gap-1 px-2 py-1">
+                    {AGENT_TIER_ORDER.map(tier => {
+                      const count = intelligence[type][tier]
+                      if (count <= 0) return null
+                      const bonus = matches ? INTEL_TIER_BONUS[tier] : 0
+                      return (
+                        <button key={tier}
+                          className="flex flex-col items-center gap-0.5 px-2 py-1 rounded transition-all hover:brightness-125"
+                          style={{
+                            background: `${AGENT_TIER_COLORS[tier]}15`,
+                            border: `1px solid ${AGENT_TIER_COLORS[tier]}40`,
+                          }}
+                          onClick={() => { onAssign({ type, tier }); setExpandedType(null) }}>
+                          <span className="text-[9px] font-bold" style={{ color: AGENT_TIER_COLORS[tier] }}>
+                            {AGENT_TIER_NAMES[tier]}
+                          </span>
+                          <span className="text-[7px] text-silk/30">×{count}</span>
+                          {bonus > 0 && (
+                            <span className="text-[7px]" style={{ color: '#00a86b' }}>+{bonus}d</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {(!intelligence || ALL_INTELLIGENCE_TYPES.every(t => intelligenceTypeTotal(intelligence, t) <= 0)) && (
+            <span className="text-[9px] text-silk/20 italic px-1">none available</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // NpcMiniCard — tiny portrait card (NPC or assigned agent in slot)
 // ---------------------------------------------------------------------------
 
@@ -864,25 +1028,21 @@ function NpcMiniCard({ agent }: { agent: Agent }) {
 // AgentHand
 // ---------------------------------------------------------------------------
 
-function AgentHand({ agents, intelligenceScrolls, assigned, pendingSlot, pendingScrollEventId, onAgentPick, onCancelPick, onScrollPick, onCancelScrollPick, onInspect }: {
-  agents: Agent[]; intelligenceScrolls: IntelligenceScroll[]
+function AgentHand({ agents, assigned, pendingSlot, onAgentPick, onCancelPick, onInspect }: {
+  agents: Agent[]
   assigned: Set<string>; pendingSlot: PendingSlot | null
-  pendingScrollEventId: string | null
   onAgentPick: (agentId: string) => void; onCancelPick: () => void
-  onScrollPick: (scroll: IntelligenceScroll) => void; onCancelScrollPick: () => void
   onInspect: (card: InspectedCard) => void
 }) {
   const isAgentPickerMode = pendingSlot != null
-  const isScrollPickerMode = pendingScrollEventId != null
-  const isAnyPickerMode = isAgentPickerMode || isScrollPickerMode
 
   return (
     <div className="flex-shrink-0 flex flex-col"
-      style={{ height: 108, borderTop: '1px solid rgba(232,213,176,0.12)', background: 'rgba(10,6,4,0.97)' }}>
+      style={{ height: 140, borderTop: '1px solid rgba(232,213,176,0.15)', background: 'linear-gradient(0deg, rgba(10,6,4,0.99) 0%, rgba(15,10,6,0.97) 100%)' }}>
       {/* Label strip */}
       <div className="flex items-center gap-2 px-3 pt-1.5 pb-0.5">
         <span className="text-[9px] uppercase tracking-widest text-silk/30">
-          {isScrollPickerMode ? 'Select a scroll for this event' : isAgentPickerMode ? 'Select an agent for this slot' : 'Hand'}
+          {isAgentPickerMode ? 'Select an agent for this slot' : 'Hand'}
         </span>
         {isAgentPickerMode && (
           <button onClick={onCancelPick}
@@ -891,45 +1051,21 @@ function AgentHand({ agents, intelligenceScrolls, assigned, pendingSlot, pending
             Cancel
           </button>
         )}
-        {isScrollPickerMode && (
-          <button onClick={onCancelScrollPick}
-            className="text-[8px] px-1.5 py-0.5 rounded transition-all ml-auto"
-            style={{ background: 'rgba(100,160,255,0.08)', border: '1px solid rgba(100,160,255,0.25)', color: 'rgba(130,180,255,0.7)' }}>
-            Cancel
-          </button>
-        )}
       </div>
 
-      {/* Cards scroll — agents first, then intelligence scrolls */}
+      {/* Agent cards */}
       <div className="flex-1 flex items-center gap-2 px-3 overflow-x-auto pb-1.5">
-        {agents.length === 0 && intelligenceScrolls.length === 0 && (
+        {agents.length === 0 && (
           <span className="text-[9px] text-silk/20 italic">Hand is empty</span>
         )}
 
-        {/* Agent cards — dimmed during scroll picker mode */}
         {agents.map(agent => (
           <AgentCard key={agent.id} agent={agent}
             isAssigned={assigned.has(agent.id)}
             isPickerMode={isAgentPickerMode}
-            dimmedForScroll={isScrollPickerMode}
             pendingSlot={pendingSlot}
             onPick={onAgentPick}
             onInspect={() => onInspect({ kind: 'agent', agent })} />
-        ))}
-
-        {/* Divider if both types present */}
-        {agents.length > 0 && intelligenceScrolls.length > 0 && (
-          <div className="flex-shrink-0 self-stretch w-px mx-1"
-            style={{ background: 'rgba(232,213,176,0.1)', marginTop: 8, marginBottom: 8 }} />
-        )}
-
-        {/* Intelligence scroll cards */}
-        {intelligenceScrolls.map(scroll => (
-          <IntelligenceScrollCard key={scroll.id} scroll={scroll}
-            dimmed={isAgentPickerMode}
-            isScrollPickerMode={isScrollPickerMode}
-            onPick={() => onScrollPick(scroll)}
-            onInspect={() => onInspect({ kind: 'scroll', scroll })} />
         ))}
       </div>
     </div>
@@ -940,8 +1076,8 @@ function AgentHand({ agents, intelligenceScrolls, assigned, pendingSlot, pending
 // AgentCard — portrait-based mini character card
 // ---------------------------------------------------------------------------
 
-function AgentCard({ agent, isAssigned, isPickerMode, dimmedForScroll, pendingSlot, onPick, onInspect }: {
-  agent: Agent; isAssigned: boolean; isPickerMode: boolean; dimmedForScroll?: boolean
+function AgentCard({ agent, isAssigned, isPickerMode, pendingSlot, onPick, onInspect }: {
+  agent: Agent; isAssigned: boolean; isPickerMode: boolean
   pendingSlot: PendingSlot | null; onPick: (agentId: string) => void
   onInspect: () => void
 }) {
@@ -954,13 +1090,11 @@ function AgentCard({ agent, isAssigned, isPickerMode, dimmedForScroll, pendingSl
     && agentMeetsSlot(agent, pendingSlot.slot)
 
   // Assigned agents appear condensed
-  const w = isAssigned ? 48 : 60
-  const h = isAssigned ? 64 : 82
+  const w = isAssigned ? 56 : 72
+  const h = isAssigned ? 76 : 100
 
-  const opacity = dimmedForScroll ? 0.2
-    : isPickerMode ? (isEligible ? 1 : 0.2) : (isBlocked ? 0.35 : 1)
-  const cursor = dimmedForScroll ? 'default'
-    : isPickerMode ? (isEligible ? 'pointer' : 'default') : 'pointer'
+  const opacity = isPickerMode ? (isEligible ? 1 : 0.2) : (isBlocked ? 0.35 : 1)
+  const cursor = isPickerMode ? (isEligible ? 'pointer' : 'default') : 'pointer'
 
   const borderStyle = cardBorderStyle(theme, isEligible)
 
@@ -1041,10 +1175,7 @@ function CardInspectModal({ card, onClose }: { card: InspectedCard; onClose: () 
       onClick={onClose}
     >
       <div onClick={e => e.stopPropagation()}>
-        {card.kind === 'agent'
-          ? <AgentInspectCard agent={card.agent} onClose={onClose} />
-          : <ScrollInspectCard scroll={card.scroll} onClose={onClose} />
-        }
+        {card.kind === 'agent' && <AgentInspectCard agent={card.agent} onClose={onClose} />}
       </div>
     </div>
   )
@@ -1175,110 +1306,6 @@ function AgentInspectCard({ agent, onClose }: { agent: Agent; onClose: () => voi
             </span>
           ))}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function ScrollInspectCard({ scroll, onClose }: { scroll: IntelligenceScroll; onClose: () => void }) {
-  const theme = TIER_THEME[scroll.tier]
-  const label = INTELLIGENCE_LABELS[scroll.type]
-  const matchStats = INTELLIGENCE_MATCHING_STATS[scroll.type]
-
-  return (
-    <div
-      className="relative rounded-xl overflow-hidden flex flex-col items-center justify-center shadow-2xl"
-      style={{
-        width: 280, minHeight: 200,
-        padding: '28px 24px 24px',
-        ...cardBorderStyle(theme, false, theme.borderWidth + 1),
-        background: `linear-gradient(160deg, ${theme.cardBg} 0%, ${theme.cardBg2} 100%)`,
-      }}
-    >
-      <button onClick={onClose} className="absolute top-2 right-3 text-silk/30 hover:text-parchment/70 transition-colors text-lg leading-none">×</button>
-
-      <div className="text-5xl mb-3">🃏</div>
-      <div className="font-serif text-lg text-parchment mb-0.5">{label.en}</div>
-      <div className="text-sm mb-4" style={{ color: 'rgba(232,213,176,0.35)' }}>{label.zh}</div>
-
-      <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: 'rgba(232,213,176,0.3)' }}>Matching Stats</div>
-      <div className="flex gap-2 mb-4">
-        {matchStats.map(stat => (
-          <span key={stat} className="px-2 py-1 rounded text-[10px] font-semibold"
-            style={{ background: `${theme.accent}20`, border: `1px solid ${theme.accent}50`, color: theme.accent }}>
-            {STAT_LABELS[stat as keyof typeof STAT_LABELS].en}
-          </span>
-        ))}
-      </div>
-
-      <div className="text-[9px] text-center text-silk/40 leading-relaxed max-w-[200px]">
-        Assign to an event during planning to buff the dice pool.
-        {matchStats.length > 0 && (
-          <> Grants <span style={{ color: theme.accent }}>+{scroll.tier === 'jade' ? 2 : 1} bonus die</span> when the event checks a matching stat.</>
-        )}
-        {' '}Consumed when the event is committed.
-      </div>
-
-      <div className="mt-4 text-[8px] font-semibold px-2 py-0.5 rounded"
-        style={{ background: `${theme.accent}18`, border: `1px solid ${theme.accent}40`, color: theme.accent }}>
-        {AGENT_TIER_NAMES[scroll.tier]} Scroll
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// IntelligenceScrollCard — non-assignable card shown in hand
-// ---------------------------------------------------------------------------
-
-function IntelligenceScrollCard({ scroll, dimmed, isScrollPickerMode, onPick, onInspect }: {
-  scroll: IntelligenceScroll; dimmed: boolean; isScrollPickerMode?: boolean
-  onPick: () => void; onInspect: () => void
-}) {
-  const theme = TIER_THEME[scroll.tier]
-  const label = INTELLIGENCE_LABELS[scroll.type]
-  const matchStats = INTELLIGENCE_MATCHING_STATS[scroll.type]
-
-  const handleClick = () => {
-    if (isScrollPickerMode) onPick()
-    else onInspect()
-  }
-
-  return (
-    <div
-      className="flex-shrink-0 flex flex-col items-center justify-between relative overflow-hidden cursor-pointer"
-      style={{
-        width: 56, height: 78,
-        borderRadius: 4,
-        opacity: dimmed ? 0.3 : 1,
-        ...cardBorderStyle(theme, isScrollPickerMode),
-        boxShadow: isScrollPickerMode
-          ? `0 0 14px ${theme.glow}, 0 0 0 2px ${theme.accent}66`
-          : undefined,
-      }}
-      onClick={handleClick}
-      title={isScrollPickerMode ? `${label.en} — click to assign` : `${label.en} — click to inspect`}
-    >
-      {/* Card body */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-1"
-        style={{ background: `linear-gradient(170deg, ${theme.cardBg} 0%, ${theme.cardBg2} 100%)` }}>
-        <div style={{ fontSize: 18 }}>🃏</div>
-        <div className="text-center font-serif leading-tight"
-          style={{ fontSize: 6.5, color: theme.accent, opacity: 0.9 }}>
-          {label.zh}
-        </div>
-        <div className="text-center leading-tight text-[5.5px]"
-          style={{ color: 'rgba(232,213,176,0.35)' }}>
-          {matchStats.map(s => STAT_ABBREVIATIONS[s]).join(' · ')}
-        </div>
-      </div>
-
-      {/* Tier pip at bottom */}
-      <div className="absolute bottom-1 left-0 right-0 flex justify-center">
-        <span className="text-[6px] px-1 rounded-sm font-semibold"
-          style={{ background: `${theme.accent}22`, color: theme.accent }}>
-          {scroll.tier}
-        </span>
       </div>
     </div>
   )

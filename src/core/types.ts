@@ -319,42 +319,97 @@ export interface DiceRollResult {
 }
 
 // ---------------------------------------------------------------------------
-// INTELLIGENCE SCROLLS
+// INTELLIGENCE — enumerated resource, 5 types
 // ---------------------------------------------------------------------------
 
 export type IntelligenceType =
-  | 'courtWhispers'
-  | 'palaceSecrets'
-  | 'medicalNotes'
-  | 'spiritualOmens'
-  | 'beautyTechniques'
+  | 'gossip'
+  | 'secrets'
+  | 'favours'
+  | 'omens'
+  | 'records'
 
-export const INTELLIGENCE_LABELS: Record<IntelligenceType, { en: string; zh: string }> = {
-  courtWhispers:    { en: 'Court Whispers',    zh: '宫闱密语' },
-  palaceSecrets:    { en: 'Palace Secrets',    zh: '宫中秘辛' },
-  medicalNotes:     { en: 'Medical Notes',     zh: '医案' },
-  spiritualOmens:   { en: 'Spiritual Omens',   zh: '天兆' },
-  beautyTechniques: { en: 'Beauty Techniques', zh: '容术' },
+export const INTELLIGENCE_LABELS: Record<IntelligenceType, string> = {
+  gossip:  'Gossip',
+  secrets: 'Secrets',
+  favours: 'Favours',
+  omens:   'Omens',
+  records: 'Records',
+} as const
+
+export const INTELLIGENCE_COLORS: Record<IntelligenceType, string> = {
+  gossip:  '#d4a017',  // amber
+  secrets: '#9060c0',  // purple
+  favours: '#c07830',  // warm orange
+  omens:   '#20a0a0',  // teal
+  records: '#4080c0',  // blue
+} as const
+
+export const INTELLIGENCE_ICONS: Record<IntelligenceType, string> = {
+  gossip:  '👂',
+  secrets: '🗝',
+  favours: '🤝',
+  omens:   '🔮',
+  records: '📜',
 } as const
 
 /**
- * Stats each scroll type is aligned with.
- * If a scroll's matching stats overlap the event's statsChecked,
- * spending it grants +1 bonus die on the reroll.
+ * Event types each intelligence is useful for.
+ * Spending a matching intelligence on an event adds bonus dice to the pool.
  */
-export const INTELLIGENCE_MATCHING_STATS: Record<IntelligenceType, StatName[]> = {
-  courtWhispers:    ['eloquence', 'cunning'],
-  palaceSecrets:    ['discretion', 'resourcefulness'],
-  medicalNotes:     ['scholarship', 'vitality'],
-  spiritualOmens:   ['spiritualArts', 'resolve'],
-  beautyTechniques: ['beauty'],
+export const INTELLIGENCE_EVENT_MATCH: Record<IntelligenceType, EventType[]> = {
+  gossip:  ['social', 'imperialFavor'],
+  secrets: ['investigation', 'justiceAndPunishment'],
+  favours: ['dominion', 'ceremony'],
+  omens:   ['spiritual', 'personal'],
+  records: ['estateManagement', 'investigation'],
 } as const
 
-export interface IntelligenceScroll {
-  id: string
+/**
+ * Intelligence stored as type × tier × count.
+ * E.g. intel.gossip.bronze = 2 means you have 2 bronze-quality gossip.
+ */
+export type IntelligenceStore = Record<IntelligenceType, Record<AgentTier, number>>
+
+/** A specific piece of intelligence: type + quality tier. */
+export interface IntelligenceItem {
   type: IntelligenceType
-  /** Tier determines the scroll's power — higher tiers give larger bonus dice on a stat match. */
   tier: AgentTier
+}
+
+export const EMPTY_INTELLIGENCE: IntelligenceStore = {
+  gossip:  { clay: 0, bronze: 0, silver: 0, gold: 0, jade: 0 },
+  secrets: { clay: 0, bronze: 0, silver: 0, gold: 0, jade: 0 },
+  favours: { clay: 0, bronze: 0, silver: 0, gold: 0, jade: 0 },
+  omens:   { clay: 0, bronze: 0, silver: 0, gold: 0, jade: 0 },
+  records: { clay: 0, bronze: 0, silver: 0, gold: 0, jade: 0 },
+}
+
+export const ALL_INTELLIGENCE_TYPES: IntelligenceType[] = [
+  'gossip', 'secrets', 'favours', 'omens', 'records',
+] as const
+
+/** Total count of a specific intelligence type across all tiers. */
+export function intelligenceTypeTotal(store: IntelligenceStore, type: IntelligenceType): number {
+  const tiers = store[type]
+  return tiers.clay + tiers.bronze + tiers.silver + tiers.gold + tiers.jade
+}
+
+/** Total count of all intelligence across all types and tiers. */
+export function intelligenceTotal(store: IntelligenceStore): number {
+  return ALL_INTELLIGENCE_TYPES.reduce((sum, t) => sum + intelligenceTypeTotal(store, t), 0)
+}
+
+/**
+ * Bonus dice from intelligence. Matching type: Clay=1, Bronze=2, Silver=3, Gold=4, Jade=5.
+ * Non-matching: 0.
+ */
+export const INTEL_TIER_BONUS: Record<AgentTier, number> = { clay: 1, bronze: 2, silver: 3, gold: 4, jade: 5 }
+
+export function intelligenceBonusDice(item: IntelligenceItem | null, eventType: EventType): number {
+  if (!item) return 0
+  const matches = INTELLIGENCE_EVENT_MATCH[item.type].includes(eventType)
+  return matches ? INTEL_TIER_BONUS[item.tier] : 0
 }
 
 // ---------------------------------------------------------------------------
@@ -440,13 +495,23 @@ export interface GameEvent {
   /** Agent assignment slots for this event. */
   slots: EventSlot[]
   /**
-   * One optional intelligence scroll placed into this event.
-   * Consumed on commitment; boosts the dice pool at resolution.
+   * Intelligence type spent on this event. Boosts dice pool if it matches the event type.
    */
-  assignedScroll: IntelligenceScroll | null
+  /** Intelligence spent on this event. Consumed from stock when committed. */
+  assignedIntelligence: IntelligenceItem | null
   /**
-   * True once the player has committed agents via Continue.
-   * Agents are locked until the event resolves.
+   * True when the player has confirmed this event for resolution.
+   * Committed events resolve on End Day. Can be cancelled same day (before inProgress).
+   */
+  committed: boolean
+  /**
+   * The day the event was committed. Used to determine if cancellation is allowed
+   * (only on the same day it was committed, before it becomes inProgress).
+   */
+  committedOnDay: number | null
+  /**
+   * True once agents are locked in (multi-day events, day after commitment).
+   * Cannot be cancelled while inProgress.
    */
   inProgress: boolean
   /**
@@ -472,7 +537,7 @@ export interface MapNodeData {
 // ---------------------------------------------------------------------------
 
 export type Consequence =
-  | { kind: 'scroll';           scroll: IntelligenceScroll }
+  | { kind: 'intelligence';     type: IntelligenceType; amount: number }
   | { kind: 'goldenDice';       amount: number }
   | { kind: 'rerolls';          amount: number }
   | { kind: 'condition';        agentId: string; condition: AgentCondition }
@@ -515,7 +580,7 @@ export interface ReputationState {
 
 export interface ResourceState {
   silver: number
-  intelligenceScrolls: IntelligenceScroll[]
+  intelligence: IntelligenceStore
   goldenDice: number
 }
 

@@ -2,7 +2,7 @@
 // Coordinates are percentages (0–100) so the map scales cleanly.
 // Adjust these once the background artwork is in place.
 
-import type { LocationId } from '@core/types'
+import type { LocationId, MapNodeData } from '@core/types'
 
 export interface NodeLayout {
   x: number // 0–100 percentage of canvas width
@@ -37,4 +37,21 @@ export const LOCATION_LAYOUT: Record<LocationId, NodeLayout> = {
 
   // Seasonal — appears only during festivals
   festivalGrounds: { x: 50, y: 90 },
+}
+
+export const UNLOCKED_BY_DEFAULT: LocationId[] = [
+  'chambers', 'innerCourt', 'householdOffice', 'imperialLibrary',
+  'imperialGardens', 'palacePhysician', 'buddhistTemple',
+]
+
+export function buildEmptyMapNodes(): MapNodeData[] {
+  return (
+    Object.entries(LOCATION_LAYOUT) as [LocationId, { x: number; y: number }][]
+  ).map(([id, position]) => ({
+    id,
+    position,
+    events: [],
+    isUnlocked: UNLOCKED_BY_DEFAULT.includes(id),
+    isVisible: true,
+  }))
 }

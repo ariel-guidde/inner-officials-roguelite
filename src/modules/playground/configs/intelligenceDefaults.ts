@@ -1,12 +1,12 @@
-import type { IntelligenceScroll } from '@core/types'
+import type { IntelligenceStore } from '@core/types'
+import { EMPTY_INTELLIGENCE } from '@core/types'
 
 /**
- * Starting intelligence scrolls for Lady Wu.
- * She begins with 2 Court Whispers (bronze) — political rumour cards
- * suited to eloquence/cunning checks at court.
+ * Starting intelligence for Lady Wu.
+ * She begins with 1 gossip and 1 secrets.
  */
-export const INTELLIGENCE_DEFAULTS: IntelligenceScroll[] = [
-  { id: 'intel-cw-1', type: 'courtWhispers',    tier: 'bronze' },
-  { id: 'intel-cw-2', type: 'courtWhispers',    tier: 'bronze' },
-  { id: 'intel-ps-1', type: 'palaceSecrets',    tier: 'clay'   },
-]
+export const INTELLIGENCE_DEFAULTS: IntelligenceStore = {
+  ...EMPTY_INTELLIGENCE,
+  gossip: { ...EMPTY_INTELLIGENCE.gossip, clay: 2 },
+  secrets: { ...EMPTY_INTELLIGENCE.secrets, clay: 1 },
+}
