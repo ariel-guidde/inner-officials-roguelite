@@ -9,6 +9,7 @@ import type {
   IntelligenceType, LocationId, MapNodeData, ReputationState, StatName,
 } from './types'
 import { EMPTY_INTELLIGENCE } from './types'
+import { buildEmptyMapNodes } from '@modules/map'
 import type { EventRuntimeState, ResolutionType } from '@modules/events'
 import type { NarrativeEntry } from '@modules/narrative'
 
@@ -346,12 +347,12 @@ export function createInitialGameState(overrides?: Partial<GameState>): GameStat
     protagonistId: 'protagonist-wu',
     haremRank: 9,
     silver: 3,
-    goldenDice: 0,
+    goldenDice: 2,
     intelligence: { ...EMPTY_INTELLIGENCE },
     reputation: { virtue: 0, ruthlessness: 0, imperialFavor: 0, shadowReach: 0, heavenlySight: 0, slander: 0 },
     agents: {},
     equipmentPool: [],
-    mapNodes: [],
+    mapNodes: buildEmptyMapNodes(),
     eventStates: {},
     narrativeLog: [],
     taizongHealth: 100,

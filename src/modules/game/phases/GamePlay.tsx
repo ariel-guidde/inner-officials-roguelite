@@ -12,14 +12,13 @@ import {
   type ResolutionQueueItem,
   buildResolutionQueue, advanceDayOnMap, buildQueueItem,
 } from '@modules/map'
-import { Dilemma, type DilemmaData, type DilemmaResult } from '@modules/dilemma'
 import {
   type ResolutionType,
   EVENT_DEFINITIONS_BY_ID as DEFS_BY_ID,
   type SpawnContext,
   selectEventsForDay, ALL_EVENT_DEFINITIONS, definitionToEvent,
 } from '@modules/events'
-import { ResolutionModal } from './ResolutionModal'
+import { EventScreen, ResolutionScreen } from '@modules/event-screen'
 
 /** Convert Record-based eventStates to the Map that spawn/eligibility logic expects. */
 function toStatesMap(record: Record<string, import('@modules/events').EventRuntimeState>) {
@@ -46,8 +45,8 @@ export function GamePlay() {
 
   // Local UI state (not persisted)
   const [selectedNodeId, setSelectedNodeId] = useState<LocationId | null>(null)
-  const [activeDilemma, setActiveDilemma] = useState<DilemmaData | null>(null)
-  const [pendingDilemmaEventId, setPendingDilemmaEventId] = useState<string | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const [resolvingEventId, setResolvingEventId] = useState<string | null>(null)
 
   // Resolution is driven by state.resolutionQueue / state.resolutionIndex
   const resolutionQueue = state.resolutionQueue
@@ -159,104 +158,10 @@ export function GamePlay() {
 
     const eventIds = queue.map(q => q.defId)
     dispatch({ type: 'SET_RESOLUTION_QUEUE', eventIds })
-    checkForDilemma(queue[0])
+    setSelectedEventId(null) // close event screen if open
+    setResolvingEventId(eventIds[0]) // open resolution for first event
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapNodes, allAgents, currentDay, dispatch])
-
-  const checkForDilemma = useCallback((item: ResolutionQueueItem) => {
-    if (item.isExpired) return
-
-    const def = DEFS_BY_ID[item.defId]
-    if (def?.dilemma && (def.dilemma.timing === 'before-roll' || def.dilemma.timing === 'standalone')) {
-      const dilemmaData: DilemmaData = {
-        title: item.event.title,
-        location: item.event.locationId,
-        narrative: item.event.description,
-        question: def.dilemma.prompt,
-        choices: def.dilemma.choices.map(c => ({
-          id: c.id,
-          label: c.label,
-          reputationDelta: c.moralWeight as Partial<ReputationState> | undefined,
-        })),
-      }
-      setActiveDilemma(dilemmaData)
-      setPendingDilemmaEventId(item.defId)
-    }
-  }, [])
-
-  const handleDilemmaResolve = useCallback((result: DilemmaResult) => {
-    const currentState = stateRef.current
-    const repResult = processReputationChange(result.reputationDelta, currentState, `dilemma:${pendingDilemmaEventId}`)
-    for (const action of repResult.actions) dispatch(action)
-    if (repResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: repResult.narrativeEntries })
-
-    const eventId = resolutionQueueRef.current[resolutionIndexRef.current]
-    const def = eventId ? DEFS_BY_ID[eventId] : undefined
-    const chosenOption = def?.dilemma?.choices.find(c => c.id === result.choiceId)
-    if (chosenOption?.immediateConsequences) {
-      const cResult = processConsequences(chosenOption.immediateConsequences, currentState, `dilemma:${pendingDilemmaEventId}:${result.choiceId}`)
-      for (const action of cResult.actions) dispatch(action)
-      if (cResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: cResult.narrativeEntries })
-    }
-
-    if (pendingDilemmaEventId) {
-      dispatch({
-        type: 'RECORD_NARRATIVE',
-        entry: { day: currentDay, kind: 'choice_made', eventId: pendingDilemmaEventId, dilemmaId: def?.dilemma?.id ?? pendingDilemmaEventId, choiceId: result.choiceId },
-      })
-      // Update event state with choiceId
-      const existing = eventStates[pendingDilemmaEventId]
-      if (existing) {
-        dispatch({ type: 'SET_EVENT_STATE', eventId: pendingDilemmaEventId, state: { ...existing, choiceId: result.choiceId } })
-      }
-    }
-
-    setActiveDilemma(null)
-    setPendingDilemmaEventId(null)
-
-    const curEventId = resolutionQueueRef.current[resolutionIndexRef.current]
-    if (chosenOption?.skipDiceRoll || def?.dilemma?.timing === 'standalone') {
-      if (curEventId) handleResolutionComplete(curEventId, true)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stateRef, pendingDilemmaEventId, currentDay, dispatch, resolutionQueueRef, resolutionIndexRef])
-
-  const handleResolutionComplete = useCallback((eventId: string, success: boolean) => {
-    let isExpired = false
-    for (const node of mapNodes) {
-      const ev = node.events.find(e => e.id === eventId)
-      if (ev && (ev.isExpired || (ev.daysRemaining === 1 && !ev.committed))) {
-        isExpired = true
-        break
-      }
-    }
-    const resolution: ResolutionType = isExpired ? 'expired' : success ? 'success' : 'failure'
-    dispatch({ type: 'RESOLVE_EVENT', eventId, resolution, choiceId: eventStates[eventId]?.choiceId })
-    dispatch({ type: 'RECORD_NARRATIVE', entry: { day: currentDay, kind: 'event_resolved', eventId, resolution } })
-
-    const nextIdx = resolutionIndex + 1
-    if (nextIdx < resolutionQueue.length) {
-      dispatch({ type: 'ADVANCE_RESOLUTION' })
-      const nextEventId = resolutionQueue[nextIdx]
-      for (const node of mapNodes) {
-        const ev = node.events.find(e => e.id === nextEventId)
-        if (!ev) continue
-        const assignedAgents = ev.slots
-          .filter(s => s.assignedAgentId != null)
-          .map(s => allAgents.find(a => a.id === s.assignedAgentId)!)
-          .filter(Boolean)
-        const nextItem = ev.isExpired || (ev.daysRemaining === 1 && !ev.committed)
-          ? { event: ev, assignedAgents: [], pool: 0, tier: 'clay' as AgentTier, statTotals: {}, isExpired: true, defId: ev.id }
-          : buildQueueItem(ev, assignedAgents)
-        checkForDilemma(nextItem)
-        break
-      }
-    } else {
-      dispatch({ type: 'SET_RESOLUTION_QUEUE', eventIds: [] })
-      advanceDay()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNodes, eventStates, currentDay, state, resolutionIndex, resolutionQueue, allAgents, dispatch])
 
   const advanceDay = useCallback(() => {
     const resolvedIds = new Set(resolutionQueueRef.current)
@@ -270,6 +175,89 @@ export function GamePlay() {
     dispatch({ type: 'ADVANCE_DAY' })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapNodes, currentDay, dispatch])
+
+  // Chain resolutions: when one finishes (resolvingEventId === null), open the next or advance day
+  useEffect(() => {
+    if (resolvingEventId !== null) return // still resolving
+    if (resolutionQueue.length === 0) return // no queue
+    if (resolutionIndex >= resolutionQueue.length) {
+      // All done — advance day
+      dispatch({ type: 'SET_RESOLUTION_QUEUE', eventIds: [] })
+      advanceDay()
+      return
+    }
+    // Open next event in queue
+    setResolvingEventId(resolutionQueue[resolutionIndex])
+  }, [resolvingEventId, resolutionQueue, resolutionIndex, advanceDay, dispatch])
+
+  // ── Keyboard shortcuts ──────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape: close resolution screen, or close event screen (reset uncommitted)
+      if (e.key === 'Escape') {
+        if (resolvingEventId) {
+          setResolvingEventId(null)
+          return
+        }
+        if (selectedEventId) {
+          // Same logic as clicking close — reset uncommitted assignments
+          const ev = (() => { for (const n of mapNodes) { const found = n.events.find(x => x.id === selectedEventId); if (found) return found } return null })()
+          if (ev && !ev.committed) {
+            for (const slot of ev.slots) {
+              if (slot.assignedAgentId && !slot.npcAgentId) {
+                dispatch({ type: 'ASSIGN_AGENT', eventId: ev.id, slotId: slot.id, agentId: null })
+              }
+            }
+            if (ev.assignedIntelligence) {
+              dispatch({ type: 'ADD_INTELLIGENCE', intelType: ev.assignedIntelligence.type, tier: ev.assignedIntelligence.tier, amount: 1 })
+              dispatch({ type: 'ASSIGN_INTELLIGENCE', eventId: ev.id, item: null })
+            }
+          }
+          setSelectedEventId(null)
+          return
+        }
+      }
+
+      // Only allow e/Tab when no event or resolution screen is open
+      if (!selectedEventId && !resolvingEventId) {
+        if (e.key === 'e') {
+          handleEndDay()
+          return
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          const nodesWithActiveEvents = mapNodes.filter(n =>
+            n.events.some(ev => !ev.isCompleted && !ev.isExpired),
+          )
+          if (nodesWithActiveEvents.length === 0) return
+          const currentIdx = selectedNodeId
+            ? nodesWithActiveEvents.findIndex(n => n.id === selectedNodeId)
+            : -1
+          const nextIdx = (currentIdx + 1) % nodesWithActiveEvents.length
+          setSelectedNodeId(nodesWithActiveEvents[nextIdx].id)
+          return
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [resolvingEventId, selectedEventId, selectedNodeId, mapNodes, dispatch, handleEndDay])
+
+  // ── Auto-select node after resolution ─────────────────────────────
+  useEffect(() => {
+    // When resolvingEventId just became null and there are more events in the queue
+    if (resolvingEventId !== null) return
+    if (resolutionQueue.length === 0) return
+    if (resolutionIndex >= resolutionQueue.length) return
+    const nextEventId = resolutionQueue[resolutionIndex]
+    if (!nextEventId) return
+    for (const node of mapNodes) {
+      if (node.events.some(e => e.id === nextEventId)) {
+        setSelectedNodeId(node.id)
+        break
+      }
+    }
+  }, [resolvingEventId, resolutionQueue, resolutionIndex, mapNodes])
 
   // Spawn new events when day changes
   useEffect(() => {
@@ -325,9 +313,21 @@ export function GamePlay() {
           agents={agents}
           allAgents={allAgents}
           selectedNodeId={selectedNodeId}
-          onNodeClick={(id) => setSelectedNodeId(prev => prev === id ? null : id)}
-          onSlotAssign={handleSlotAssign}
-          onIntelAssign={handleIntelAssign}
+          onNodeClick={(id) => {
+            if (selectedNodeId === id) {
+              setSelectedNodeId(null)
+              return
+            }
+            const node = mapNodes.find(n => n.id === id)
+            const activeEvents = node?.events.filter(e => !e.isCompleted && !e.isExpired) ?? []
+            if (activeEvents.length === 1) {
+              setSelectedNodeId(id)
+              setSelectedEventId(activeEvents[0].id)
+            } else {
+              setSelectedNodeId(id)
+            }
+          }}
+          onEventClick={(eventId) => setSelectedEventId(eventId)}
           onCommitEvent={handleCommitEvent}
           onCancelCommit={handleCancelCommit}
           onEndDay={handleEndDay}
@@ -337,25 +337,95 @@ export function GamePlay() {
         />
       </main>
 
-      {/* Resolution modal -- dice roll for non-dilemma events */}
-      {isResolutionOpen && currentResItem && !activeDilemma && (
-        <ResolutionModal
-          item={currentResItem}
-          index={resolutionIndex}
-          total={resolutionQueue.length}
-          nextDay={currentDay + 1}
-          goldenDiceAvailable={goldenDice}
-          onComplete={(success, goldenSpent) => {
-            if (goldenSpent > 0) dispatch({ type: 'CHANGE_GOLDEN_DICE', delta: -goldenSpent })
-            handleResolutionComplete(currentResItem.defId, success)
-          }}
-        />
-      )}
+      {/* Full-screen event view */}
+      {selectedEventId && !resolvingEventId && (() => {
+        let ev: import('@core/types').GameEvent | undefined
+        for (const node of mapNodes) { ev = node.events.find(e => e.id === selectedEventId); if (ev) break }
+        if (!ev) return null
+        return (
+          <EventScreen
+            event={ev}
+            agents={agents}
+            allAgents={allAgents}
+            allNodes={mapNodes}
+            intelligence={intelligence}
+            currentDay={currentDay}
+            onSlotAssign={handleSlotAssign}
+            onIntelAssign={handleIntelAssign}
+            onCommit={handleCommitEvent}
+            onCancel={handleCancelCommit}
+            onClose={() => {
+              // Reset uncommitted assignments when closing
+              const ev = (() => { for (const n of mapNodes) { const e = n.events.find(x => x.id === selectedEventId); if (e) return e } return null })()
+              if (ev && !ev.committed) {
+                for (const slot of ev.slots) {
+                  if (slot.assignedAgentId && !slot.npcAgentId) {
+                    dispatch({ type: 'ASSIGN_AGENT', eventId: ev.id, slotId: slot.id, agentId: null })
+                  }
+                }
+                if (ev.assignedIntelligence) {
+                  dispatch({ type: 'ADD_INTELLIGENCE', intelType: ev.assignedIntelligence.type, tier: ev.assignedIntelligence.tier, amount: 1 })
+                  dispatch({ type: 'ASSIGN_INTELLIGENCE', eventId: ev.id, item: null })
+                }
+              }
+              setSelectedEventId(null)
+            }}
+          />
+        )
+      })()}
 
-      {/* Dilemma overlay */}
-      {activeDilemma && (
-        <Dilemma data={activeDilemma} onResolve={handleDilemmaResolve} />
-      )}
+      {/* Resolution screen — progressive narrative + dice + dilemma */}
+      {resolvingEventId && (() => {
+        let ev: import('@core/types').GameEvent | undefined
+        for (const node of mapNodes) { ev = node.events.find(e => e.id === resolvingEventId); if (ev) break }
+        if (!ev) return null
+        const assignedAgentsList = ev.slots
+          .filter(s => s.assignedAgentId)
+          .map(s => allAgents.find(a => a.id === s.assignedAgentId)!)
+          .filter(Boolean)
+        const item = buildQueueItem(ev, assignedAgentsList)
+        return (
+          <ResolutionScreen
+            event={ev}
+            assignedAgents={assignedAgentsList}
+            pool={item.pool}
+            tier={item.tier}
+            goldenDiceAvailable={goldenDice}
+            rerollsAvailable={0}
+            onComplete={(result) => {
+              if (result.goldenSpent > 0) dispatch({ type: 'CHANGE_GOLDEN_DICE', delta: -result.goldenSpent })
+
+              const resolution: ResolutionType = result.success ? 'success' : 'failure'
+              dispatch({ type: 'RESOLVE_EVENT', eventId: resolvingEventId, resolution, choiceId: result.choiceId })
+              dispatch({ type: 'RECORD_NARRATIVE', entry: { day: currentDay, kind: 'event_resolved', eventId: resolvingEventId, resolution } })
+
+              if (result.choiceId) {
+                const def = DEFS_BY_ID[resolvingEventId]
+                dispatch({ type: 'RECORD_NARRATIVE', entry: { day: currentDay, kind: 'choice_made', eventId: resolvingEventId, dilemmaId: def?.dilemma?.id ?? '', choiceId: result.choiceId } })
+
+                // Process consequences from chosen option
+                const choice = def?.dilemma?.choices.find(c => c.id === result.choiceId)
+                if (choice?.moralWeight) {
+                  const repResult = processReputationChange(choice.moralWeight as Partial<ReputationState>, stateRef.current, `dilemma:${resolvingEventId}`)
+                  for (const action of repResult.actions) dispatch(action)
+                  if (repResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: repResult.narrativeEntries })
+                }
+                if (choice?.immediateConsequences) {
+                  const cResult = processConsequences(choice.immediateConsequences, stateRef.current, `dilemma:${resolvingEventId}:${result.choiceId}`)
+                  for (const action of cResult.actions) dispatch(action)
+                  if (cResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: cResult.narrativeEntries })
+                }
+              }
+
+              // Remove resolved event from the map and clear resolution screen
+              dispatch({ type: 'REMOVE_EVENTS', eventIds: [resolvingEventId] })
+              dispatch({ type: 'ADVANCE_RESOLUTION' })
+              setResolvingEventId(null)
+            }}
+            onClose={() => setResolvingEventId(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

@@ -42,6 +42,7 @@ export interface MapProps {
   onIntelAssign?: (eventId: string, intelItem: IntelligenceItem | null) => void
   onCommitEvent?: (eventId: string) => void
   onCancelCommit?: (eventId: string) => void
+  onEventClick?: (eventId: string) => void
   onEndDay?: () => void
   currentDay?: number
   dayPhase?: DayPhase
@@ -67,6 +68,7 @@ export function Map({
   onIntelAssign,
   onCommitEvent,
   onCancelCommit,
+  onEventClick,
   onEndDay,
   currentDay = 1,
   showDebugOverlay = false,
@@ -95,6 +97,16 @@ export function Map({
         const playerSlots = ev.slots.filter(s => !s.npcAgentId)
         const mandatory = playerSlots.filter(s => s.isMandatory)
         if (mandatory.length === 0 || mandatory.every(s => s.assignedAgentId != null)) count++
+      }
+    }
+    return count
+  }, [nodes])
+
+  const committedCount = useMemo(() => {
+    let count = 0
+    for (const node of nodes) {
+      for (const ev of node.events) {
+        if (ev.committed) count++
       }
     }
     return count
@@ -132,26 +144,17 @@ export function Map({
           showDebugOverlay={showDebugOverlay}
           assigned={assigned}
           readyCount={readyCount}
+          committedCount={committedCount}
           onNodeClick={onNodeClick}
           onEndDay={onEndDay}
         />
 
-        {/* Event sidebar */}
+        {/* Event sidebar — simplified list, click to open full-screen */}
         {selectedNode && (
           <EventSidebar
             node={selectedNode}
-            agents={agents}
-            agentById={agentById}
-            assigned={assigned}
-            pendingSlot={pendingSlot}
             onClose={() => onNodeClick(selectedNode.id)}
-            onSetPendingSlot={setPendingSlot}
-            onSlotAssign={onSlotAssign}
-            onIntelAssign={onIntelAssign}
-            onCommitEvent={onCommitEvent}
-            onCancelCommit={onCancelCommit}
-            intelligence={intelligence}
-            currentDay={currentDay}
+            onEventClick={onEventClick}
           />
         )}
       </div>

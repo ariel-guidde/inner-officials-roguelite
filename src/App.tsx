@@ -3,9 +3,8 @@ import { DebugOverlay } from '@modules/debug'
 
 export default function App() {
   return (
-    <>
-      <Game />
+    <Game>
       <DebugOverlay />
-    </>
+    </Game>
   )
 }

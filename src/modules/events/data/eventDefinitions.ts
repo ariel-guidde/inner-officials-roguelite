@@ -698,7 +698,12 @@ const POOL_EVENTS: EventDefinition[] = [
 // Registry
 // ---------------------------------------------------------------------------
 
+// Act 1 events from data layer
+import { ALL_ACT1_EVENTS } from '@data/events'
+
 export const ALL_EVENT_DEFINITIONS: EventDefinition[] = [
+  ...ALL_ACT1_EVENTS,
+  // Legacy storylines (kept for playground/editor)
   ...SHADOW_CONSORT,
   ...PHYSICIAN_DILEMMA,
   ...POISONED_HAIRPIN,

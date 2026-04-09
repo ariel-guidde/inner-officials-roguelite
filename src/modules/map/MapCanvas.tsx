@@ -4,7 +4,7 @@ import { assignedAgentIds } from './logic/eventUtils'
 import { MapNode } from './MapNode'
 import { CORNERS, EDGES } from './mapTypes'
 
-export function MapCanvas({ nodes, selectedNodeId, highlightedNodeId, currentDay, showDebugOverlay, assigned, readyCount, onNodeClick, onEndDay }: {
+export function MapCanvas({ nodes, selectedNodeId, highlightedNodeId, currentDay, showDebugOverlay, assigned, readyCount, committedCount, onNodeClick, onEndDay }: {
   nodes: MapNodeData[]
   selectedNodeId?: LocationId | null
   highlightedNodeId?: LocationId | null
@@ -12,6 +12,7 @@ export function MapCanvas({ nodes, selectedNodeId, highlightedNodeId, currentDay
   showDebugOverlay: boolean
   assigned: Set<string>
   readyCount: number
+  committedCount: number
   onNodeClick: (locationId: LocationId) => void
   onEndDay?: () => void
 }) {
@@ -84,19 +85,19 @@ export function MapCanvas({ nodes, selectedNodeId, highlightedNodeId, currentDay
           padding: '10px 28px',
           fontSize: 15,
           borderRadius: 10,
-          background: readyCount > 0
+          background: committedCount > 0
             ? 'linear-gradient(135deg, rgba(255,215,0,0.22) 0%, rgba(200,150,0,0.14) 100%)'
             : 'rgba(232,213,176,0.06)',
-          border: readyCount > 0
+          border: committedCount > 0
             ? '2px solid rgba(255,215,0,0.55)'
             : '1px solid rgba(232,213,176,0.15)',
-          color: readyCount > 0 ? 'rgba(255,215,0,0.95)' : 'rgba(232,213,176,0.35)',
-          boxShadow: readyCount > 0
+          color: committedCount > 0 ? 'rgba(255,215,0,0.95)' : 'rgba(232,213,176,0.35)',
+          boxShadow: committedCount > 0
             ? '0 0 20px rgba(255,215,0,0.25), 0 0 40px rgba(255,215,0,0.1), inset 0 1px 0 rgba(255,255,255,0.08)'
             : 'none',
-          animation: readyCount > 0 ? 'endDayPulse 2s ease-in-out infinite' : 'none',
+          animation: committedCount > 0 ? 'endDayPulse 2s ease-in-out infinite' : 'none',
         }}>
-        {readyCount > 0 ? `End Day (${readyCount} ready)` : 'End Day'}
+        {committedCount > 0 ? `End Day (${committedCount} committed)` : 'End Day'}
       </button>
 
     </div>

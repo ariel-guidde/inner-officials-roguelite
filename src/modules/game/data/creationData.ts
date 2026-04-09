@@ -1,11 +1,7 @@
-// =============================================================================
-// Character creation data — backgrounds, educations, dispositions, maid archetypes
-// =============================================================================
-
 import type { ReputationState, StatName } from '@core/types'
 
 // ---------------------------------------------------------------------------
-// Layer 1: Family Background
+// Layer 1: Family Background (pick 1 of 3)
 // ---------------------------------------------------------------------------
 
 export interface FamilyBackground {
@@ -13,155 +9,81 @@ export interface FamilyBackground {
   name: string
   description: string
   silver: number
-  statBonuses: Partial<Record<StatName, number>>
+  statBonus: Partial<Record<StatName, number>>
   connection: string
+  chunhuaLean: Partial<Record<StatName, number>>
 }
 
 export const FAMILY_BACKGROUNDS: FamilyBackground[] = [
   {
-    id: 'noble-clan',
-    name: 'Noble Clan',
-
-    description: 'The Wus married into the Li clan\'s orbit. Your blood opens doors — but also invites scrutiny.',
+    id: 'letters',
+    name: 'Daughter of Letters',
+    description: 'Your father was a scholar-official. Your household valued ink, poetry, and protocol. Chunhua grew up organizing his library.',
     silver: 3,
-    statBonuses: { eloquence: 1, scholarship: 1 },
-    connection: 'Zhangsun Wuji knows your father',
+    statBonus: { scholarship: 1 },
+    connection: 'Consort Xu knows your father\'s writings',
+    chunhuaLean: { cunning: 1 },
   },
   {
-    id: 'military-family',
-    name: 'Military Family',
-
-    description: 'Your father rode with the founders. The sword on your wall is not decorative.',
-    silver: 3,
-    statBonuses: { resolve: 1, vitality: 1 },
-    connection: 'General Li Ji served with your father',
-  },
-  {
-    id: 'merchant-wealth',
-    name: 'Merchant Wealth',
-
-    description: 'Your family trades in silk, salt, and favors. You arrived with more silver than the other girls.',
-    silver: 7,
-    statBonuses: { resourcefulness: 1, cunning: 1 },
+    id: 'wealth',
+    name: 'Daughter of Wealth',
+    description: 'Your family trades in silk and salt. You learned accounts before poetry. Chunhua grew up managing servants.',
+    silver: 5,
+    statBonus: { resourcefulness: 1 },
     connection: 'Trade Quarter contacts from day 1',
+    chunhuaLean: { resourcefulness: 1 },
   },
   {
-    id: 'scholar-official',
-    name: 'Scholar-Official',
-
-    description: 'Your household smelled of ink. You read the classics before you read people.',
-    silver: 4,
-    statBonuses: { scholarship: 2 },
-    connection: 'Consort Xu heard of your father\'s library',
-  },
-  {
-    id: 'provincial-gentry',
-    name: 'Provincial Gentry',
-
-    description: 'Far from the capital, your family rules a small world. Now you\'ve entered a larger one.',
-    silver: 4,
-    statBonuses: { vitality: 1, resourcefulness: 1 },
-    connection: 'Wu family network available early',
-  },
-  {
-    id: 'fallen-aristocracy',
-    name: 'Fallen Aristocracy',
-
-    description: 'Your clan once held three ministries. Now they hold debts. You are here to change that.',
-    silver: 2,
-    statBonuses: { eloquence: 1, discretion: 1 },
-    connection: 'Older consorts remember your grandmother',
-  },
-  {
-    id: 'temple-patronage',
-    name: 'Temple Patronage',
-
-    description: 'Your family endowed a temple. The monks raised you as much as your parents did.',
+    id: 'soldiers',
+    name: 'Daughter of Soldiers',
+    description: 'Your father commanded men. Discipline, endurance, reading intentions. Chunhua is tough and practical.',
     silver: 3,
-    statBonuses: { spiritualArts: 2 },
-    connection: 'Nun Mingzhu, access to Buddhist network',
-  },
-  {
-    id: 'imperial-favor',
-    name: 'Imperial Favor',
-
-    description: 'A poem about your beauty reached the Emperor. You were summoned by name. Everyone already hates you.',
-    silver: 2,
-    statBonuses: { beauty: 2 },
-    connection: 'Taizong specifically requested you',
+    statBonus: { resolve: 1 },
+    connection: 'General Li Ji served with your father',
+    chunhuaLean: { resolve: 1 },
   },
 ]
 
 // ---------------------------------------------------------------------------
-// Layer 2: Education (pick 2)
+// Layer 2: Education (pick 1 of 5)
 // ---------------------------------------------------------------------------
 
 export interface Education {
   id: string
   name: string
   stat: StatName
-  benefit: string
+  perk: string
   flavor: string
 }
 
 export const EDUCATIONS: Education[] = [
-  { id: 'classical-literature', name: 'Classical Literature', stat: 'scholarship', benefit: 'Can identify forgeries and historical references', flavor: 'You\'ve read the Five Classics and the histories.' },
-  { id: 'calligraphy', name: 'Calligraphy', stat: 'eloquence', benefit: 'Starting equipment: Calligraphy Set', flavor: 'Your hand is beautiful. In this court, that\'s a qualification.' },
-  { id: 'music', name: 'Music', stat: 'beauty', benefit: 'Can participate in musical events', flavor: 'The pipa, the guqin. Music opens rooms that words cannot.' },
-  { id: 'medicine', name: 'Medicine & Herbs', stat: 'vitality', benefit: 'Can identify poisons; bonus in physician events', flavor: 'Your mother taught you which plants heal and which ones don\'t.' },
-  { id: 'needlework', name: 'Needlework & Weaving', stat: 'resourcefulness', benefit: 'Starting equipment: Embroidered Sash', flavor: 'Your silk work is exceptional. Patterns carry meaning.' },
-  { id: 'household-mgmt', name: 'Household Management', stat: 'cunning', benefit: 'Bonus to estate/budget events', flavor: 'You ran your family\'s household accounts.' },
-  { id: 'riding', name: 'Riding & Outdoors', stat: 'resolve', benefit: 'Can participate in hunt events; impresses Taizong', flavor: 'Unusual for a woman. Your father raised you differently.' },
-  { id: 'buddhist-study', name: 'Buddhist Study', stat: 'spiritualArts', benefit: 'Bonus at temple events; can quote sutras', flavor: 'Impermanence, suffering, emptiness.' },
-  { id: 'court-etiquette', name: 'Court Etiquette', stat: 'discretion', benefit: 'Fewer protocol mistakes; bonus to first impressions', flavor: 'You know every bow, every precedence.' },
-  { id: 'painting', name: 'Painting', stat: 'beauty', benefit: 'Can create gifts; bonus in cultural events', flavor: 'Your eye sees composition in everything.' },
-  { id: 'politics-law', name: 'Politics & Law', stat: 'cunning', benefit: 'Can understand edicts and legal proceedings', flavor: 'Your father discussed governance at dinner. You listened.' },
-  { id: 'taoist-philosophy', name: 'Taoist Philosophy', stat: 'spiritualArts', benefit: 'Can discuss with Taoist Master Sun', flavor: 'The Dao that can be spoken is not the eternal Dao.' },
+  { id: 'calligraphy', name: 'Calligraphy', stat: 'eloquence', perk: 'Starting equipment: Lotus Petal Brush', flavor: 'Your hand is beautiful.' },
+  { id: 'medicine', name: 'Medicine', stat: 'vitality', perk: 'Can identify poisons', flavor: 'Your mother taught you herbs.' },
+  { id: 'music', name: 'Music', stat: 'beauty', perk: 'Can join performances', flavor: 'The pipa speaks for you.' },
+  { id: 'protocol', name: 'Court Protocol', stat: 'discretion', perk: 'Fewer mistakes at audience', flavor: 'You know every bow.' },
+  { id: 'scripture', name: 'Buddhist Scripture', stat: 'spiritualArts', perk: 'Temple access easier', flavor: 'You read the sutras.' },
 ]
 
 // ---------------------------------------------------------------------------
-// Layer 3a: Disposition
+// Layer 3: Passion (pick 1 of 4)
 // ---------------------------------------------------------------------------
 
-export interface Disposition {
+export interface Passion {
   id: string
   name: string
+  stat: StatName
   description: string
-  reputationBonuses: Partial<Record<keyof ReputationState, number>>
 }
 
-export const DISPOSITIONS: Disposition[] = [
-  { id: 'kindhearted', name: 'Kind-hearted', description: 'NPCs trust you faster. Ruthless choices cost more Virtue.', reputationBonuses: { virtue: 2 } },
-  { id: 'ambitious', name: 'Ambitious', description: 'Taizong and Tai notice ambition. Zhi is wary.', reputationBonuses: { imperialFavor: 1 } },
-  { id: 'cautious', name: 'Cautious', description: 'Better at avoiding scandal. Slower to build relationships.', reputationBonuses: { shadowReach: 1 } },
-  { id: 'passionate', name: 'Passionate', description: 'Stronger emotional reactions from NPCs. Bigger swings.', reputationBonuses: {} },
-  { id: 'devout', name: 'Devout', description: 'Temple access easier. Perceived as non-threatening.', reputationBonuses: { heavenlySight: 1, virtue: 1 } },
-  { id: 'cunning-disp', name: 'Cunning', description: 'Better at reading people. NPCs are also more suspicious.', reputationBonuses: { shadowReach: 1 } },
-  { id: 'proud', name: 'Proud', description: 'You don\'t back down. Resolve checks easier, but enemies faster.', reputationBonuses: { ruthlessness: 1 } },
+export const PASSIONS: Passion[] = [
+  { id: 'poetry', name: 'Poetry', stat: 'eloquence', description: 'Extra literary events and prince interactions through verse.' },
+  { id: 'beauty-passion', name: 'Beauty', stat: 'beauty', description: 'Extra ceremony events and the Emperor notices you sooner.' },
+  { id: 'intrigue', name: 'Intrigue', stat: 'cunning', description: 'Extra investigation events and eunuch network access.' },
+  { id: 'devotion', name: 'Devotion', stat: 'spiritualArts', description: 'Extra temple events and spiritual counsel sought by others.' },
 ]
 
 // ---------------------------------------------------------------------------
-// Layer 3b: Chunhua's Archetype
-// ---------------------------------------------------------------------------
-
-export interface MaidArchetype {
-  id: string
-  name: string
-  description: string
-  strongStats: Partial<Record<StatName, number>>
-  flavor: string
-}
-
-export const MAID_ARCHETYPES: MaidArchetype[] = [
-  { id: 'the-eyes', name: 'The Eyes', description: 'Best at intelligence gathering. She reports what she sees.', strongStats: { cunning: 4, discretion: 4 }, flavor: 'Observant, quiet, misses nothing.' },
-  { id: 'the-voice', name: 'The Voice', description: 'Best at social events. She builds her own network among servants.', strongStats: { eloquence: 4, cunning: 3 }, flavor: 'Talkative, charming, makes friends easily.' },
-  { id: 'the-shield', name: 'The Shield', description: 'Best at crisis events. She\'ll stand between you and danger.', strongStats: { resolve: 4, vitality: 3 }, flavor: 'Protective, stubborn, physically tough.' },
-  { id: 'the-hands', name: 'The Hands', description: 'Best at household events. She keeps your quarters running.', strongStats: { resourcefulness: 4, discretion: 3 }, flavor: 'Practical, organized, fixes everything.' },
-  { id: 'the-heart', name: 'The Heart', description: 'Best at personal events. She grounds you emotionally.', strongStats: { spiritualArts: 3, eloquence: 3 }, flavor: 'Empathetic, wise beyond her years.' },
-]
-
-// ---------------------------------------------------------------------------
-// Derived: build starting state from choices
+// Base stats + derived
 // ---------------------------------------------------------------------------
 
 export const BASE_STATS: Record<StatName, number> = {
@@ -171,7 +93,6 @@ export const BASE_STATS: Record<StatName, number> = {
 
 export interface CreationChoices {
   background: FamilyBackground
-  educations: [Education, Education]
-  disposition: Disposition
-  maidArchetype: MaidArchetype
+  education: Education
+  passion: Passion
 }

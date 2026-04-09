@@ -14,7 +14,7 @@ import { Tutorial } from './phases/Tutorial'
 import { GamePlay } from './phases/GamePlay'
 import {
   BASE_STATS,
-  FAMILY_BACKGROUNDS, EDUCATIONS, DISPOSITIONS, MAID_ARCHETYPES,
+  FAMILY_BACKGROUNDS, EDUCATIONS, PASSIONS,
   type CreationChoices,
 } from './data/creationData'
 
@@ -30,12 +30,11 @@ function GameInner() {
 
   const buildStats = useCallback((choices: CreationChoices, tutorialBonuses?: Partial<Record<StatName, number>>) => {
     const stats = { ...BASE_STATS } as Record<StatName, number>
-    for (const [k, v] of Object.entries(choices.background.statBonuses)) {
+    for (const [k, v] of Object.entries(choices.background.statBonus)) {
       stats[k as StatName] += v
     }
-    for (const ed of choices.educations) {
-      stats[ed.stat] += 1
-    }
+    stats[choices.education.stat] += 1
+    stats[choices.passion.stat] += 1
     if (tutorialBonuses) {
       for (const [k, v] of Object.entries(tutorialBonuses)) {
         stats[k as StatName] += v
@@ -63,20 +62,20 @@ function GameInner() {
     }
     dispatch({ type: 'ADD_AGENT', agent: protagonist })
 
-    // Add Chunhua based on maid archetype
-    const baseStats: StatBlock = {
+    // Add Chunhua — background affects her lean
+    const chunhuaStats: StatBlock = {
       beauty: 2, cunning: 1, eloquence: 1, discretion: 1,
       resolve: 1, vitality: 1, resourcefulness: 1, spiritualArts: 1, scholarship: 1,
     }
-    for (const [k, v] of Object.entries(choices.maidArchetype.strongStats)) {
-      (baseStats as Record<string, number>)[k] = v
+    for (const [k, v] of Object.entries(choices.background.chunhuaLean)) {
+      (chunhuaStats as Record<string, number>)[k] = (chunhuaStats as Record<string, number>)[k] + v
     }
     const chunhua: Agent = {
       id: 'chunhua',
       name: 'Chunhua',
       portraitId: 'Servant 1',
       tier: 'bronze' as AgentTier,
-      stats: baseStats,
+      stats: chunhuaStats,
       conditions: [],
       tags: ['female', 'servant', 'maid', 'follower'],
     }
@@ -87,14 +86,13 @@ function GameInner() {
       dispatch({ type: 'ADD_EQUIPMENT', equipmentId: eq.id })
     }
 
-    // Set silver from background
-    dispatch({ type: 'CHANGE_SILVER', delta: choices.background.silver - 3 }) // initial state has 3 silver
-
-    // Set reputation from disposition
-    const repDeltas = choices.disposition.reputationBonuses
-    if (Object.keys(repDeltas).length > 0) {
-      dispatch({ type: 'CHANGE_REPUTATION', deltas: repDeltas })
+    // Calligraphy education gives starting brush
+    if (choices.education.id === 'calligraphy') {
+      dispatch({ type: 'ADD_EQUIPMENT', equipmentId: 'tool-lotus-brush' })
     }
+
+    // Set silver from background
+    dispatch({ type: 'CHANGE_SILVER', delta: choices.background.silver - 3 })
 
     // Set initial intelligence (1 clay gossip)
     dispatch({ type: 'ADD_INTELLIGENCE', intelType: 'gossip', tier: 'clay', amount: 1 })
@@ -111,9 +109,8 @@ function GameInner() {
   const handleCreationSkip = useCallback(() => {
     const defaults: CreationChoices = {
       background: FAMILY_BACKGROUNDS[0],
-      educations: [EDUCATIONS[0], EDUCATIONS[1]],
-      disposition: DISPOSITIONS[0],
-      maidArchetype: MAID_ARCHETYPES[0],
+      education: EDUCATIONS[0],
+      passion: PASSIONS[0],
     }
     setCreationChoices(defaults)
     const stats = buildStats(defaults)
@@ -133,14 +130,10 @@ function GameInner() {
   }, [creationChoices, buildStats, initializeGameState])
 
   if (phase === 'creation') {
-    // Show title or creation based on local UI state
-    if (!creationChoices) {
-      return <TitleOrCreation
-        onSkipToGame={handleCreationSkip}
-        onCreationComplete={handleCreationComplete}
-        showCreation={true}
-      />
-    }
+    return <TitleOrCreation
+      onSkipToGame={handleCreationSkip}
+      onCreationComplete={handleCreationComplete}
+    />
   }
 
   if (phase === 'tutorial' && creationChoices) {
@@ -151,11 +144,10 @@ function GameInner() {
     return <GamePlay />
   }
 
-  // Default: title/creation screen
+  // Ending or unknown phase — show title
   return <TitleOrCreation
     onSkipToGame={handleCreationSkip}
     onCreationComplete={handleCreationComplete}
-    showCreation={false}
   />
 }
 
@@ -163,12 +155,11 @@ function GameInner() {
 // TitleOrCreation — handles title screen + creation flow
 // ---------------------------------------------------------------------------
 
-function TitleOrCreation({ onSkipToGame, onCreationComplete, showCreation }: {
+function TitleOrCreation({ onSkipToGame, onCreationComplete }: {
   onSkipToGame: () => void
   onCreationComplete: (choices: CreationChoices) => void
-  showCreation: boolean
 }) {
-  const [showingCreation, setShowingCreation] = useState(showCreation)
+  const [showingCreation, setShowingCreation] = useState(false)
 
   if (showingCreation) {
     return <CharacterCreation onComplete={onCreationComplete} onSkip={onSkipToGame} />
@@ -222,10 +213,11 @@ function TitleOrCreation({ onSkipToGame, onCreationComplete, showCreation }: {
 // Root export — wraps everything in the provider
 // ---------------------------------------------------------------------------
 
-export function Game() {
+export function Game({ children }: { children?: React.ReactNode }) {
   return (
     <GameStateProvider>
       <GameInner />
+      {children}
     </GameStateProvider>
   )
 }
