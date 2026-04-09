@@ -545,6 +545,8 @@ export type Consequence =
   | { kind: 'relationship';     npcId: string; delta: number }
   | { kind: 'unlockLocation';   locationId: LocationId }
   | { kind: 'triggerEvent';     eventId: string }
+  | { kind: 'equipment';       equipmentId: string }
+  | { kind: 'silver';          amount: number }
   | { kind: 'narrative';        text: string }
 
 export type OutcomeCondition =
@@ -624,31 +626,4 @@ export type GamePhase = 'setup' | 'run' | 'gameOver'
 
 export type GameOutcome = 'victory' | 'death' | 'exile' | 'betrayal' | 'ongoing'
 
-// ---------------------------------------------------------------------------
-// FULL GAME STATE  (matches Zustand store shape)
-// ---------------------------------------------------------------------------
-
-export interface GameState {
-  phase: GamePhase
-  outcome: GameOutcome
-  currentDay: number
-  dayPhase: DayPhase
-  edictDaysRemaining: number
-  edictsCompleted: number
-
-  protagonistId: string
-  haremRank: HaremRank
-
-  resources: ResourceState
-  reputation: ReputationState
-
-  agents: Agent[]
-  mapNodes: MapNodeData[]
-  activeEvents: GameEvent[]
-
-  pendingRoll: DiceRollConfig | null
-  lastRollResult: DiceRollResult | null
-
-  difficulty: DiceDifficulty
-  isRolling: boolean
-}
+// GameState is defined in core/gameState.ts (the active version used by the reducer).

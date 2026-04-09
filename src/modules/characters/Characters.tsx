@@ -13,7 +13,7 @@ import {
   agentRankShort, agentRankFull,
 } from '@core/types'
 import { applyConditionPenalties } from './logic/conditionEffects'
-import { applyEquipmentBonuses } from './logic/equipmentEffects'
+import { applyEquipmentBonuses } from '@lib/equipment'
 import { statSummary } from './logic/statTotals'
 import { TIER_THEME, TAG_CAT_STYLE, cardBorderStyle, type TierTheme } from './theme'
 import { getPortrait } from './portraitRegistry'

@@ -9,7 +9,7 @@ import type {
   LocationId, MapNodeData, StatName,
 } from '@core/types'
 import { AGENT_TIER_ORDER } from '@core/types'
-import { applyEquipmentBonuses } from '@modules/characters'
+import { applyEquipmentBonuses } from '@lib/equipment'
 import type { EventRuntimeState, SpawnContext } from '@modules/events'
 import { ALL_EVENT_DEFINITIONS, selectEventsForDay, definitionToEvent } from '@modules/events'
 import { computeEventPool } from './poolCalculation'

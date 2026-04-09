@@ -1,6 +1,5 @@
 export { Characters, type CharactersProps } from './Characters'
 export { computePool, statSummary } from './logic/statTotals'
 export { applyConditionPenalties, isAgentBlocked } from './logic/conditionEffects'
-export { applyEquipmentBonuses, meetsRequirements } from './logic/equipmentEffects'
 export { TIER_THEME, TAG_CAT_STYLE, cardBorderStyle, type TierTheme } from './theme'
 export { getPortrait, registerPortrait, listPortraits } from './portraitRegistry'

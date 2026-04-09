@@ -7,6 +7,7 @@ export default defineConfig({
     alias: {
       '@core': '/src/core',
       '@modules': '/src/modules',
+      '@data': '/src/data',
       '@assets': '/src/assets',
       '@lib': '/src/lib',
     },

@@ -1,10 +1,10 @@
 import type { Agent } from '@core/types'
 import {
-  ATTIRE_COURT_CEREMONIAL, ATTIRE_GUARD_UNIFORM, ATTIRE_IMPERIAL_SILK,
-  ATTIRE_SCHOLARS_ROBE, ATTIRE_FESTIVAL_GOWN,
-  ACC_JADE_HAIRPIN, ACC_GOLD_PHOENIX, ACC_PRAYER_BEADS, ACC_JADE_THUMB_RING, ACC_SCHOLARS_PENDANT,
-  TOOL_MEDICINE_CHEST, TOOL_ACCOUNT_LEDGER, TOOL_BRUSH_SET, TOOL_DIVINATION_STICKS,
-  WEAP_PALACE_BLADE, WEAP_OFFICERS_SWORD,
+  ATTIRE_CRIMSON_COURT_DRESS, ATTIRE_GUARD_LEATHER, ATTIRE_GOLDEN_CLOUD_ROBE,
+  ATTIRE_SCHOLARS_INDIGO, ATTIRE_PEONY_BROCADE,
+  ACC_JADE_BUTTERFLY_PIN, ACC_GOLD_PHOENIX_CROWN, ACC_PRAYER_BEAD_BRACELET, ACC_SCHOLARS_INK_PENDANT,
+  TOOL_MEDICINE_POUCH, TOOL_ACCOUNT_LEDGER, TOOL_FOUR_TREASURES, TOOL_BRONZE_INCENSE,
+  WEAP_PALACE_DAGGER, WEAP_OFFICERS_SWORD,
 } from './equipmentDefaults'
 
 /** Full sample cast for Playground testing. */
@@ -24,8 +24,8 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 2, vitality: 2, resourcefulness: 1, spiritualArts: 1, scholarship: 1,
     },
     equipment: {
-      attire:    ATTIRE_COURT_CEREMONIAL,
-      accessory: ACC_JADE_HAIRPIN,
+      attire:    ATTIRE_CRIMSON_COURT_DRESS,
+      accessory: ACC_JADE_BUTTERFLY_PIN,
       tool:      null,
     },
   },
@@ -64,8 +64,8 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       martial: 2,
     },
     equipment: {
-      attire:    ATTIRE_GUARD_UNIFORM,
-      accessory: ACC_JADE_THUMB_RING,
+      attire:    ATTIRE_GUARD_LEATHER,
+      accessory: null,
       tool:      null,
       weapon:    WEAP_OFFICERS_SWORD,
     },
@@ -105,9 +105,9 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 1, vitality: 2, resourcefulness: 2, spiritualArts: 1, scholarship: 4,
     },
     equipment: {
-      attire:    ATTIRE_SCHOLARS_ROBE,
-      accessory: ACC_SCHOLARS_PENDANT,
-      tool:      TOOL_MEDICINE_CHEST,
+      attire:    ATTIRE_SCHOLARS_INDIGO,
+      accessory: ACC_SCHOLARS_INK_PENDANT,
+      tool:      TOOL_MEDICINE_POUCH,
     },
   },
 
@@ -125,7 +125,7 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 5, vitality: 4, resourcefulness: 4, spiritualArts: 3, scholarship: 5,
     },
     equipment: {
-      attire:    ATTIRE_IMPERIAL_SILK,
+      attire:    ATTIRE_GOLDEN_CLOUD_ROBE,
       accessory: null,
       tool:      null,
     },
@@ -145,8 +145,8 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 5, vitality: 3, resourcefulness: 4, spiritualArts: 2, scholarship: 4,
     },
     equipment: {
-      attire:    ATTIRE_IMPERIAL_SILK,
-      accessory: ACC_GOLD_PHOENIX,
+      attire:    ATTIRE_GOLDEN_CLOUD_ROBE,
+      accessory: ACC_GOLD_PHOENIX_CROWN,
       tool:      null,
     },
   },
@@ -165,8 +165,8 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 3, vitality: 5, resourcefulness: 3, spiritualArts: 2, scholarship: 3,
     },
     equipment: {
-      attire:    ATTIRE_FESTIVAL_GOWN,
-      accessory: ACC_GOLD_PHOENIX,
+      attire:    ATTIRE_PEONY_BROCADE,
+      accessory: ACC_GOLD_PHOENIX_CROWN,
       tool:      null,
     },
   },
@@ -185,9 +185,9 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 3, vitality: 4, resourcefulness: 2, spiritualArts: 3, scholarship: 2,
     },
     equipment: {
-      attire:    ATTIRE_COURT_CEREMONIAL,
-      accessory: ACC_PRAYER_BEADS,
-      tool:      TOOL_DIVINATION_STICKS,
+      attire:    ATTIRE_CRIMSON_COURT_DRESS,
+      accessory: ACC_PRAYER_BEAD_BRACELET,
+      tool:      TOOL_BRONZE_INCENSE,
     },
   },
 
@@ -225,7 +225,7 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 2, vitality: 3, resourcefulness: 1, spiritualArts: 2, scholarship: 2,
     },
     equipment: {
-      attire:    ATTIRE_COURT_CEREMONIAL,
+      attire:    ATTIRE_CRIMSON_COURT_DRESS,
       accessory: null,
       tool:      null,
     },
@@ -284,9 +284,9 @@ export const CHARACTERS_DEFAULTS: Agent[] = [
       resolve: 2, vitality: 1, resourcefulness: 1, spiritualArts: 1, scholarship: 5,
     },
     equipment: {
-      attire:    ATTIRE_SCHOLARS_ROBE,
-      accessory: ACC_SCHOLARS_PENDANT,
-      tool:      TOOL_BRUSH_SET,
+      attire:    ATTIRE_SCHOLARS_INDIGO,
+      accessory: ACC_SCHOLARS_INK_PENDANT,
+      tool:      TOOL_FOUR_TREASURES,
     },
   },
 ]

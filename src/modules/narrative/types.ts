@@ -1,46 +1,36 @@
 // =============================================================================
-// narrative/types.ts — Content-layer types for events (NOT game-state types)
-// See design/mechanics/narrative-module.md for full design rationale.
+// Narrative types — every kind of thing that can happen in a run.
+// The log is append-only. The index enables fast queries.
 // =============================================================================
 
-import type { Consequence, OutcomeCondition } from '@core/types'
+import type { AgentCondition, AgentTier, HaremRank, IntelligenceType } from '@core/types'
+import type { ResolutionType } from '@modules/events'
 
-// ---------------------------------------------------------------------------
-// EventChoice — a pre-roll approach the player selects
-// ---------------------------------------------------------------------------
+export type NarrativeEntry =
+  | { day: number; kind: 'event_resolved'; eventId: string; resolution: ResolutionType }
+  | { day: number; kind: 'choice_made'; eventId: string; dilemmaId: string; choiceId: string }
+  | { day: number; kind: 'agent_recruited'; agentId: string; source: string }
+  | { day: number; kind: 'agent_lost'; agentId: string; reason: string }
+  | { day: number; kind: 'equipment_acquired'; equipmentId: string; source: string }
+  | { day: number; kind: 'equipment_lost'; equipmentId: string; reason: string }
+  | { day: number; kind: 'reputation_change'; metric: string; oldValue: number; newValue: number }
+  | { day: number; kind: 'reputation_milestone'; metric: string; value: number }
+  | { day: number; kind: 'rank_change'; oldRank: HaremRank; newRank: HaremRank }
+  | { day: number; kind: 'prince_interaction'; princeId: string; nature: string }
+  | { day: number; kind: 'condition_gained'; agentId: string; condition: AgentCondition }
+  | { day: number; kind: 'condition_removed'; agentId: string; condition: AgentCondition }
+  | { day: number; kind: 'intelligence_acquired'; intelType: IntelligenceType; tier: AgentTier; source: string }
+  | { day: number; kind: 'silver_change'; amount: number; source: string }
+  | { day: number; kind: 'taizong_health'; oldValue: number; newValue: number; cause: string }
+  | { day: number; kind: 'day_note'; text: string }
 
-export interface EventChoice {
-  id: string
-  label: string
-  description: string
-  poolModifier?: number
-  thresholdModifier?: number
-  /** If present, these outcomes override the script-level outcomes for this choice. */
-  outcomes?: EventOutcome[]
-}
+export type NarrativeKind = NarrativeEntry['kind']
 
-// ---------------------------------------------------------------------------
-// EventOutcome — narrative + consequences for one result band
-// ---------------------------------------------------------------------------
-
-export interface EventOutcome {
-  condition: OutcomeCondition
-  narrative: string
-  rewards?: Consequence[]
-  costs?: Consequence[]
-}
-
-// ---------------------------------------------------------------------------
-// EventScript — the full content definition for one event
-// ---------------------------------------------------------------------------
-
-export interface EventScript {
-  /** Matches GameEvent.id exactly, or a GameEvent.type string for fallback. */
-  eventId: string
-  /** Shown at the top of the resolution modal — sets the scene. */
-  intro: string
-  /** Optional pre-roll choices. Player picks one before dice are rolled. */
-  choices?: EventChoice[]
-  /** Post-roll outcome entries. Matched top-to-bottom; first match wins. */
-  outcomes: EventOutcome[]
+export interface NarrativeIndex {
+  byEvent: Record<string, NarrativeEntry[]>
+  byAgent: Record<string, NarrativeEntry[]>
+  byDay: Record<number, NarrativeEntry[]>
+  byKind: Record<NarrativeKind, NarrativeEntry[]>
+  choices: Record<string, string>                    // `${eventId}:${dilemmaId}` → choiceId
+  resolvedEvents: Record<string, ResolutionType>     // eventId → resolution
 }

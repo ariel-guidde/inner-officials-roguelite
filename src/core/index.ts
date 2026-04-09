@@ -1,2 +1,6 @@
 export * from './types'
 export * from './events'
+export { type GameState, type GameAction, gameReducer, createInitialGameState } from './gameState'
+export { GameStateProvider, useGameState, useGameDispatch, useGameSelector } from './GameStateContext'
+export { processConsequences, processReputationChange, type ConsequenceResult } from './consequences'
+export { saveGame, loadGame, deleteSave, listSaves, hasSaves, type SaveSlotId, type SaveSlotMeta } from './saveLoad'

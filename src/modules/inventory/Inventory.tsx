@@ -7,13 +7,11 @@ import type {
   Agent, AgentTier, Equipment, EquipmentSlot, StatName,
 } from '@core/types'
 import {
-  AGENT_TIER_COLORS, STAT_LABELS,
+  AGENT_TIER_COLORS, AGENT_TIER_ORDER, STAT_LABELS,
   STAT_ABBREVIATIONS, EQUIPMENT_SLOT_ICONS, EQUIPMENT_SLOT_LABELS,
   EQUIPMENT_ITEM_TAG_LABELS,
 } from '@core/types'
-import { meetsRequirements } from '@modules/characters'
-
-const TIER_ORDER: AgentTier[] = ['clay', 'bronze', 'silver', 'gold', 'jade']
+import { meetsRequirements } from '@lib/equipment'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -50,7 +48,7 @@ export function Inventory({
   // Sort by slot then tier
   const sortedPool = [...filteredPool].sort((a, b) => {
     if (a.slot !== b.slot) return a.slot.localeCompare(b.slot)
-    return TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)
+    return AGENT_TIER_ORDER.indexOf(a.tier) - AGENT_TIER_ORDER.indexOf(b.tier)
   })
 
   const isGuard = selectedAgent?.tags.includes('guard') ?? false

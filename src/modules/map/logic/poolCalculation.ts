@@ -5,7 +5,7 @@
 
 import type { Agent, GameEvent } from '@core/types'
 import { intelligenceBonusDice } from '@core/types'
-import { applyEquipmentBonuses } from '@modules/characters'
+import { applyEquipmentBonuses } from '@lib/equipment'
 
 /**
  * Total dice pool for an event given the assigned agents.

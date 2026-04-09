@@ -614,30 +614,42 @@ const POOL_EVENTS: EventDefinition[] = [
         {
           id: 'yang-honesty',
           label: '"My mother taught me to see people clearly."',
-          description: 'Bold. You\'re telling her you can read people — including her.',
           skipDiceRoll: true,
           moralWeight: { virtue: 1 },
+          immediateConsequences: [
+            { kind: 'equipment', equipmentId: 'acc-silver-mirror' },
+            { kind: 'narrative', text: 'Yang nods slowly. Later, a servant brings a polished silver mirror to your quarters. "From the Consort," she says. "For someone who sees clearly."' },
+          ],
         },
         {
           id: 'yang-flattery',
           label: '"That true grace cannot be learned from books — only observed."',
-          description: 'A compliment aimed precisely. She\'ll know what you\'re doing.',
           skipDiceRoll: true,
           moralWeight: { imperialFavor: 1 },
+          immediateConsequences: [
+            { kind: 'equipment', equipmentId: 'tool-lacquer-fan' },
+            { kind: 'narrative', text: 'Yang\'s mouth curves. She produces a red lacquer fan from her sleeve and offers it across the table. "Then observe more carefully."' },
+          ],
         },
         {
           id: 'yang-deflection',
           label: '"Patience. My father said the palace teaches it faster than any tutor."',
-          description: 'Safe. Forgettable. In the palace, that\'s its own kind of danger.',
           skipDiceRoll: true,
           moralWeight: { shadowReach: 1 },
+          immediateConsequences: [
+            { kind: 'silver', amount: 2 },
+            { kind: 'narrative', text: 'She says nothing. Moves to the next girl. But that evening, two silver taels appear on your writing desk with no note.' },
+          ],
         },
         {
           id: 'yang-vulnerability',
           label: '"To be afraid and do it anyway."',
-          description: 'The truest thing you could say. Her expression softens — barely.',
           skipDiceRoll: true,
           moralWeight: { virtue: 2 },
+          immediateConsequences: [
+            { kind: 'equipment', equipmentId: 'acc-jade-butterfly' },
+            { kind: 'narrative', text: 'Her expression changes — barely, but you catch it. The next morning, a jade butterfly hairpin arrives. No message. She remembers what honesty looks like.' },
+          ],
         },
       ],
     },

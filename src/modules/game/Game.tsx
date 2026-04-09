@@ -1,11 +1,14 @@
 // =============================================================================
 // Game.tsx — Main game component
-// Manages phases: creation → tutorial → gameplay
-// This is what the real product looks like (not the dev playground).
+// Manages phases: creation -> tutorial -> gameplay
+// Wraps everything in GameStateProvider so all children share context.
 // =============================================================================
 
 import { useState, useCallback } from 'react'
-import type { StatName } from '@core/types'
+import type { StatName, StatBlock, AgentTier, Agent } from '@core/types'
+import { RANK_TITLES } from '@core/types'
+import { GameStateProvider, useGameState } from '@core/GameStateContext'
+import { STARTING_EQUIPMENT } from '@data/equipment'
 import { CharacterCreation } from './phases/CharacterCreation'
 import { Tutorial } from './phases/Tutorial'
 import { GamePlay } from './phases/GamePlay'
@@ -15,24 +18,24 @@ import {
   type CreationChoices,
 } from './data/creationData'
 
-type GamePhase = 'title' | 'creation' | 'tutorial' | 'playing'
+// ---------------------------------------------------------------------------
+// Inner component that can use the context
+// ---------------------------------------------------------------------------
 
-export function Game() {
-  const [phase, setPhase] = useState<GamePhase>('title')
+function GameInner() {
+  const { state, dispatch } = useGameState()
+  const phase = state.phase
+
   const [creationChoices, setCreationChoices] = useState<CreationChoices | null>(null)
-  const [finalStats, setFinalStats] = useState<Record<StatName, number> | null>(null)
 
   const buildStats = useCallback((choices: CreationChoices, tutorialBonuses?: Partial<Record<StatName, number>>) => {
     const stats = { ...BASE_STATS } as Record<StatName, number>
-    // Layer 1: background
     for (const [k, v] of Object.entries(choices.background.statBonuses)) {
       stats[k as StatName] += v
     }
-    // Layer 2: educations
     for (const ed of choices.educations) {
       stats[ed.stat] += 1
     }
-    // Tutorial bonuses
     if (tutorialBonuses) {
       for (const [k, v] of Object.entries(tutorialBonuses)) {
         stats[k as StatName] += v
@@ -41,13 +44,71 @@ export function Game() {
     return stats
   }, [])
 
+  /** Initialize the game state for a set of creation choices + final stats. */
+  const initializeGameState = useCallback((choices: CreationChoices, stats: Record<StatName, number>) => {
+    const haremRank = 9
+    const rankTitle = RANK_TITLES[haremRank].en.split(' — ')[0]
+
+    // Add protagonist
+    const protagonist: Agent = {
+      id: 'protagonist-wu',
+      name: `${rankTitle} Wu`,
+      portraitId: 'Concubine1',
+      tier: 'bronze' as AgentTier,
+      stats: { ...stats } as StatBlock,
+      conditions: [],
+      tags: ['female', 'concubine', 'protagonist'],
+      isProtagonist: true,
+      haremRank,
+    }
+    dispatch({ type: 'ADD_AGENT', agent: protagonist })
+
+    // Add Chunhua based on maid archetype
+    const baseStats: StatBlock = {
+      beauty: 2, cunning: 1, eloquence: 1, discretion: 1,
+      resolve: 1, vitality: 1, resourcefulness: 1, spiritualArts: 1, scholarship: 1,
+    }
+    for (const [k, v] of Object.entries(choices.maidArchetype.strongStats)) {
+      (baseStats as Record<string, number>)[k] = v
+    }
+    const chunhua: Agent = {
+      id: 'chunhua',
+      name: 'Chunhua',
+      portraitId: 'Servant 1',
+      tier: 'bronze' as AgentTier,
+      stats: baseStats,
+      conditions: [],
+      tags: ['female', 'servant', 'maid', 'follower'],
+    }
+    dispatch({ type: 'ADD_AGENT', agent: chunhua })
+
+    // Add starting equipment
+    for (const eq of STARTING_EQUIPMENT) {
+      dispatch({ type: 'ADD_EQUIPMENT', equipmentId: eq.id })
+    }
+
+    // Set silver from background
+    dispatch({ type: 'CHANGE_SILVER', delta: choices.background.silver - 3 }) // initial state has 3 silver
+
+    // Set reputation from disposition
+    const repDeltas = choices.disposition.reputationBonuses
+    if (Object.keys(repDeltas).length > 0) {
+      dispatch({ type: 'CHANGE_REPUTATION', deltas: repDeltas })
+    }
+
+    // Set initial intelligence (1 clay gossip)
+    dispatch({ type: 'ADD_INTELLIGENCE', intelType: 'gossip', tier: 'clay', amount: 1 })
+
+    // Transition to playing
+    dispatch({ type: 'SET_PHASE', phase: 'playing' })
+  }, [dispatch])
+
   const handleCreationComplete = useCallback((choices: CreationChoices) => {
     setCreationChoices(choices)
-    setPhase('tutorial')
-  }, [])
+    dispatch({ type: 'SET_PHASE', phase: 'tutorial' })
+  }, [dispatch])
 
   const handleCreationSkip = useCallback(() => {
-    // Quick start with defaults
     const defaults: CreationChoices = {
       background: FAMILY_BACKGROUNDS[0],
       educations: [EDUCATIONS[0], EDUCATIONS[1]],
@@ -55,52 +116,64 @@ export function Game() {
       maidArchetype: MAID_ARCHETYPES[0],
     }
     setCreationChoices(defaults)
-    setFinalStats(buildStats(defaults))
-    setPhase('playing')
-  }, [buildStats])
+    const stats = buildStats(defaults)
+    initializeGameState(defaults, stats)
+  }, [buildStats, initializeGameState])
 
   const handleTutorialComplete = useCallback((bonusStats: Partial<Record<StatName, number>>) => {
     if (!creationChoices) return
-    setFinalStats(buildStats(creationChoices, bonusStats))
-    setPhase('playing')
-  }, [creationChoices, buildStats])
+    const stats = buildStats(creationChoices, bonusStats)
+    initializeGameState(creationChoices, stats)
+  }, [creationChoices, buildStats, initializeGameState])
 
   const handleTutorialSkip = useCallback(() => {
     if (!creationChoices) return
-    setFinalStats(buildStats(creationChoices))
-    setPhase('playing')
-  }, [creationChoices, buildStats])
-
-  if (phase === 'title') {
-    return <TitleScreen onNewGame={() => setPhase('creation')} onSkipToGame={handleCreationSkip} />
-  }
+    const stats = buildStats(creationChoices)
+    initializeGameState(creationChoices, stats)
+  }, [creationChoices, buildStats, initializeGameState])
 
   if (phase === 'creation') {
-    return <CharacterCreation onComplete={handleCreationComplete} onSkip={handleCreationSkip} />
+    // Show title or creation based on local UI state
+    if (!creationChoices) {
+      return <TitleOrCreation
+        onSkipToGame={handleCreationSkip}
+        onCreationComplete={handleCreationComplete}
+        showCreation={true}
+      />
+    }
   }
 
   if (phase === 'tutorial' && creationChoices) {
     return <Tutorial choices={creationChoices} onComplete={handleTutorialComplete} onSkip={handleTutorialSkip} />
   }
 
-  if (phase === 'playing' && finalStats && creationChoices) {
-    return (
-      <GamePlay
-        stats={finalStats}
-        silver={creationChoices.background.silver}
-        choices={creationChoices}
-      />
-    )
+  if (phase === 'playing') {
+    return <GamePlay />
   }
 
-  return null
+  // Default: title/creation screen
+  return <TitleOrCreation
+    onSkipToGame={handleCreationSkip}
+    onCreationComplete={handleCreationComplete}
+    showCreation={false}
+  />
 }
 
 // ---------------------------------------------------------------------------
-// Title Screen
+// TitleOrCreation — handles title screen + creation flow
 // ---------------------------------------------------------------------------
 
-function TitleScreen({ onNewGame, onSkipToGame }: { onNewGame: () => void; onSkipToGame: () => void }) {
+function TitleOrCreation({ onSkipToGame, onCreationComplete, showCreation }: {
+  onSkipToGame: () => void
+  onCreationComplete: (choices: CreationChoices) => void
+  showCreation: boolean
+}) {
+  const [showingCreation, setShowingCreation] = useState(showCreation)
+
+  if (showingCreation) {
+    return <CharacterCreation onComplete={onCreationComplete} onSkip={onSkipToGame} />
+  }
+
   return (
     <div className="fixed inset-0 bg-ink flex flex-col items-center justify-center"
       style={{ background: 'radial-gradient(ellipse at center top, rgba(26,18,9,1) 0%, rgba(5,3,1,1) 70%)' }}>
@@ -119,7 +192,7 @@ function TitleScreen({ onNewGame, onSkipToGame }: { onNewGame: () => void; onSki
 
       {/* Menu */}
       <div className="flex flex-col gap-3 w-64">
-        <button onClick={onNewGame}
+        <button onClick={() => setShowingCreation(true)}
           className="px-6 py-3 rounded-lg font-serif text-base transition-all hover:brightness-125"
           style={{
             background: 'rgba(255,215,0,0.1)',
@@ -140,7 +213,19 @@ function TitleScreen({ onNewGame, onSkipToGame }: { onNewGame: () => void; onSki
       </div>
 
       {/* Version */}
-      <div className="absolute bottom-4 text-[10px] text-silk/10">v0.1.0 — Act 1: Taizong's Court</div>
+      <div className="absolute bottom-4 text-[10px] text-silk/10">v0.1.0 -- Act 1: Taizong's Court</div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Root export — wraps everything in the provider
+// ---------------------------------------------------------------------------
+
+export function Game() {
+  return (
+    <GameStateProvider>
+      <GameInner />
+    </GameStateProvider>
   )
 }

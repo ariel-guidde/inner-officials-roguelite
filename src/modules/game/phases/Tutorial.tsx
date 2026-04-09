@@ -32,6 +32,8 @@ interface TutorialStage {
   narrative: string
   choices?: TutorialChoice[]
   diceCheck?: { stats: StatName[]; threshold: number }
+  // For stage 2: equip an item before rolling
+  hasEquipStep?: boolean
   // For stage 3: agent assignment teaching
   hasAgentSlot?: boolean
   // For stage 4: multiple locations
@@ -60,8 +62,9 @@ const STAGES: TutorialStage[] = [
     virtue: 'Speech',
     title: 'The Poetry Recitation',
     location: 'The Library',
-    teaches: 'Dice checks and stat pools',
-    narrative: 'Candidates are gathered in the library. Consort Xu presides. You must recite a poem and answer a question about its meaning. Your Eloquence and Scholarship determine your dice pool.',
+    teaches: 'Equipment and dice checks',
+    narrative: 'Candidates are gathered in the library. Consort Xu presides. Before you begin, a servant places a writing set before each candidate — brush, ink, paper. You notice your Lotus Petal Brush among your belongings. Equipping it will sharpen your calligraphy.\n\nEquip the brush to your tool slot, then recite your poem. Your Eloquence and Scholarship determine your dice pool — equipment bonuses count.',
+    hasEquipStep: true,
     diceCheck: { stats: ['eloquence', 'scholarship'], threshold: 2 },
     choices: [
       { id: 'help-song', label: 'Whisper a hint to Lady Song', description: 'The candidate beside you is frozen with panic. Her brush hasn\'t moved.', effect: 'Virtue +1, Song favor', statBonus: {}, reputationEffect: 'virtue' },
@@ -124,6 +127,9 @@ export function Tutorial({ choices, onComplete, onSkip }: Props) {
   // Dice state
   const [rollConfig, setRollConfig] = useState<DiceRollConfig | null>(null)
   const [rollResult, setRollResult] = useState<DiceRollResult | null>(null)
+
+  // Stage 2 equip state
+  const [brushEquipped, setBrushEquipped] = useState(false)
 
   // Stage 4 state
   const [visitedLocations, setVisitedLocations] = useState<string[]>([])
@@ -188,6 +194,7 @@ export function Tutorial({ choices, onComplete, onSkip }: Props) {
       setRollConfig(null)
       setRollResult(null)
       setChunhuaAssigned(false)
+      setBrushEquipped(false)
       setVisitedLocations([])
       setSilverSpent(0)
       setStage4Results({})
@@ -259,6 +266,27 @@ export function Tutorial({ choices, onComplete, onSkip }: Props) {
               </span>
             </div>
             <span className="text-sm text-gold/60 font-serif">{stage.location}</span>
+
+            {/* Equipment teaching for stage 2 */}
+            {stage.hasEquipStep && stageState === 'action' && (
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <div className="text-xs text-silk/30 uppercase tracking-widest">Equipment</div>
+                <button onClick={() => setBrushEquipped(!brushEquipped)}
+                  className="flex flex-col items-center gap-1.5 px-4 py-2 rounded-lg transition-all"
+                  style={{
+                    background: brushEquipped ? 'rgba(0,168,107,0.12)' : 'rgba(232,213,176,0.05)',
+                    border: `1px solid ${brushEquipped ? 'rgba(0,168,107,0.4)' : 'rgba(232,213,176,0.15)'}`,
+                  }}>
+                  <span className="text-lg">🖊</span>
+                  <span className="text-[10px] font-serif" style={{ color: brushEquipped ? '#00a86b' : 'rgba(232,213,176,0.4)' }}>
+                    Lotus Petal Brush
+                  </span>
+                  <span className="text-[8px]" style={{ color: brushEquipped ? '#00a86b' : 'rgba(232,213,176,0.25)' }}>
+                    {brushEquipped ? '✓ Equipped — Scholarship +1' : 'Click to equip (Tool slot)'}
+                  </span>
+                </button>
+              </div>
+            )}
 
             {/* Agent slot teaching for stage 3 */}
             {stage.hasAgentSlot && stageState === 'action' && (

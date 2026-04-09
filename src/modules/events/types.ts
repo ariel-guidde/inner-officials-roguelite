@@ -103,7 +103,7 @@ export interface EventSlotTemplate {
 export interface DilemmaChoice {
   id: string
   label: string
-  description: string
+  description?: string
   /** Override the event's stats for the dice check. */
   overrideStats?: [StatName] | [StatName, StatName]
   overrideThreshold?: number

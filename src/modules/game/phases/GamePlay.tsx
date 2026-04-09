@@ -1,188 +1,155 @@
-// =============================================================================
 // GamePlay — Act 1: Taizong's Court
-// Full game loop: map → assign agents → end day → dice resolution → dilemma → repeat
-// Uses the same modules as the playground, connected for real.
-// =============================================================================
+// All state reads from GameStateContext; all mutations through dispatch.
 
-import { useState, useEffect, useMemo } from 'react'
-import type {
-  Agent, AgentTier, DiceRollConfig, DiceRollResult, GameEvent,
-  IntelligenceItem, IntelligenceStore, IntelligenceType, LocationId, MapNodeData, StatName, StatBlock,
-  ReputationState, HaremRank,
-} from '@core/types'
-import { EMPTY_INTELLIGENCE } from '@core/types'
-import { STAT_LABELS, RANK_TITLES } from '@core/types'
-import { Dice } from '@modules/dice'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useLatest } from '@lib/useLatest'
+import type { Agent, AgentTier, IntelligenceItem, LocationId, ReputationState } from '@core/types'
+import { RANK_TITLES } from '@core/types'
+import { useGameState } from '@core/GameStateContext'
+import { processConsequences, processReputationChange } from '@core/consequences'
 import {
-  Map as PalaceMap, URGENCY_COLOR, URGENCY_LABEL,
-  buildEmptyMapNodes, UNLOCKED_BY_DEFAULT,
+  Map as PalaceMap, UNLOCKED_BY_DEFAULT,
   type ResolutionQueueItem,
-  assignSlot, assignIntelligence, commitEvent, cancelCommit,
-  spawnEventsOnMap, buildResolutionQueue, advanceDayOnMap,
+  buildResolutionQueue, advanceDayOnMap, buildQueueItem,
 } from '@modules/map'
-import { applyEquipmentBonuses } from '@modules/characters'
 import { Dilemma, type DilemmaData, type DilemmaResult } from '@modules/dilemma'
 import {
-  type EventRuntimeState, type ResolutionType,
+  type ResolutionType,
   EVENT_DEFINITIONS_BY_ID as DEFS_BY_ID,
   type SpawnContext,
+  selectEventsForDay, ALL_EVENT_DEFINITIONS, definitionToEvent,
 } from '@modules/events'
-import type { CreationChoices } from '../data/creationData'
+import { ResolutionModal } from './ResolutionModal'
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
-interface Props {
-  stats: Record<StatName, number>
-  silver: number
-  choices: CreationChoices
+/** Convert Record-based eventStates to the Map that spawn/eligibility logic expects. */
+function toStatesMap(record: Record<string, import('@modules/events').EventRuntimeState>) {
+  return new Map(Object.entries(record))
 }
 
-export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
-  // ── Core state ──────────────────────────────────────────────────────
-  const [currentDay, setCurrentDay] = useState(1)
-  const [mapNodes, setMapNodes] = useState<MapNodeData[]>(() => buildEmptyMapNodes())
+/** Derive the hand of controllable agents (protagonist + followers). */
+function deriveHandAgents(agents: Record<string, Agent>): Agent[] {
+  return Object.values(agents).filter(
+    a => a.isProtagonist || a.tags?.includes('follower') || a.tags?.includes('maid'),
+  )
+}
+
+export function GamePlay() {
+  const { state, dispatch } = useGameState()
+  const {
+    currentDay, mapNodes, eventStates, silver, goldenDice,
+    intelligence, reputation, agents: agentsRecord, haremRank,
+  } = state
+
+  // Derived
+  const agents = useMemo(() => deriveHandAgents(agentsRecord), [agentsRecord])
+  const allAgents = useMemo(() => Object.values(agentsRecord), [agentsRecord])
+
+  // Local UI state (not persisted)
   const [selectedNodeId, setSelectedNodeId] = useState<LocationId | null>(null)
-  const [eventStates, setEventStates] = useState<Map<string, EventRuntimeState>>(() => new Map())
-  const [haremRank, setHaremRank] = useState<HaremRank>(9)
-
-  // ── Resources & reputation ──────────────────────────────────────────
-  const [reputation, setReputation] = useState<ReputationState>({
-    virtue: choices.disposition.reputationBonuses['virtue'] ?? 0,
-    ruthlessness: choices.disposition.reputationBonuses['ruthlessness'] ?? 0,
-    imperialFavor: choices.disposition.reputationBonuses['imperialFavor'] ?? 0,
-    shadowReach: choices.disposition.reputationBonuses['shadowReach'] ?? 0,
-    heavenlySight: choices.disposition.reputationBonuses['heavenlySight'] ?? 0,
-    slander: 0,
-  })
-  const [silver, setSilver] = useState(initialSilver)
-  const [goldenDice, setGoldenDice] = useState(0)
-  const [intelligence, setIntelligence] = useState<IntelligenceStore>({ ...EMPTY_INTELLIGENCE, gossip: { ...EMPTY_INTELLIGENCE.gossip, clay: 1 } })
-
-  // ── Resolution state ────────────────────────────────────────────────
-  const [resolutionQueue, setResolutionQueue] = useState<ResolutionQueueItem[]>([])
-  const [resolutionIndex, setResolutionIndex] = useState(0)
-  const isResolutionOpen = resolutionQueue.length > 0
-  const currentResItem = isResolutionOpen ? resolutionQueue[resolutionIndex] : null
-
-  // ── Dilemma state ───────────────────────────────────────────────────
   const [activeDilemma, setActiveDilemma] = useState<DilemmaData | null>(null)
   const [pendingDilemmaEventId, setPendingDilemmaEventId] = useState<string | null>(null)
 
-  // ── Agents ──────────────────────────────────────────────────────────
-  const protagonist: Agent = useMemo(() => {
-    const rankTitle = RANK_TITLES[haremRank].en.split(' — ')[0]
-    return {
-      id: 'protagonist-wu',
-      name: `${rankTitle} Wu`,
-      portraitId: 'Concubine1',
-      tier: 'bronze' as AgentTier,
-      stats: { ...stats } as StatBlock,
-      conditions: [],
-      tags: ['female', 'concubine', 'protagonist'] as Agent['tags'],
-      isProtagonist: true,
-      haremRank,
-    }
-  }, [stats, haremRank])
+  // Resolution is driven by state.resolutionQueue / state.resolutionIndex
+  const resolutionQueue = state.resolutionQueue
+  const resolutionIndex = state.resolutionIndex
+  const isResolutionOpen = resolutionQueue.length > 0
 
-  const chunhua: Agent = useMemo(() => {
-    const baseStats: StatBlock = {
-      beauty: 2, cunning: 1, eloquence: 1, discretion: 1,
-      resolve: 1, vitality: 1, resourcefulness: 1, spiritualArts: 1, scholarship: 1,
+  // Build the actual ResolutionQueueItem for the current index
+  const currentResItem = useMemo<ResolutionQueueItem | null>(() => {
+    if (!isResolutionOpen) return null
+    const eventId = resolutionQueue[resolutionIndex]
+    if (!eventId) return null
+    // Find event in map nodes
+    for (const node of mapNodes) {
+      const ev = node.events.find(e => e.id === eventId)
+      if (!ev) continue
+      // Check if expired
+      if (ev.isExpired || (ev.daysRemaining === 1 && !ev.committed)) {
+        return { event: ev, assignedAgents: [], pool: 0, tier: 'clay' as AgentTier, statTotals: {}, isExpired: true, defId: ev.id }
+      }
+      const assignedAgents = ev.slots
+        .filter(s => s.assignedAgentId != null)
+        .map(s => allAgents.find(a => a.id === s.assignedAgentId)!)
+        .filter(Boolean)
+      return buildQueueItem(ev, assignedAgents)
     }
-    for (const [k, v] of Object.entries(choices.maidArchetype.strongStats)) {
-      (baseStats as Record<string, number>)[k] = v
-    }
-    return {
-      id: 'chunhua',
-      name: 'Chunhua',
-      portraitId: 'Servant 1',
-      tier: 'bronze' as AgentTier,
-      stats: baseStats,
-      conditions: [],
-      tags: ['female', 'servant', 'maid', 'follower'] as Agent['tags'],
-    }
-  }, [choices])
+    return null
+  }, [isResolutionOpen, resolutionQueue, resolutionIndex, mapNodes, allAgents])
 
-  const agents = useMemo(() => [protagonist, chunhua], [protagonist, chunhua])
+  const stateRef = useLatest(state)
+  const resolutionQueueRef = useLatest(resolutionQueue)
+  const resolutionIndexRef = useLatest(resolutionIndex)
 
   // ── Spawning ────────────────────────────────────────────────────────
 
   const unlockedSet = useMemo(() => new Set<LocationId>(UNLOCKED_BY_DEFAULT), [])
 
-  const buildCtx = (day: number, states: Map<string, EventRuntimeState>): SpawnContext => ({
-    currentDay: day,
-    eventStates: states,
-    unlockedLocations: unlockedSet,
-    reputation,
-  })
+  const runSpawn = useCallback((day: number) => {
+    const statesMap = toStatesMap(eventStates)
+    const ctx: SpawnContext = {
+      currentDay: day,
+      eventStates: statesMap,
+      unlockedLocations: unlockedSet,
+      reputation,
+    }
+    const toSpawn = selectEventsForDay(ALL_EVENT_DEFINITIONS, ctx)
+    for (const def of toSpawn) {
+      if (!eventStates[def.id]) {
+        dispatch({
+          type: 'SPAWN_EVENT',
+          node: def.locationId,
+          event: definitionToEvent(def),
+          runtimeState: { defId: def.id, state: 'onMap', dayPlaced: day },
+        })
+      }
+    }
+  }, [eventStates, unlockedSet, reputation, dispatch])
 
-  const runSpawn = (day: number, states: Map<string, EventRuntimeState>) => {
-    const result = spawnEventsOnMap(mapNodes, states, buildCtx(day, states), day)
-    setMapNodes(result.nodes)
-    setEventStates(result.states)
-  }
-
+  // Initial spawn on mount
   useEffect(() => {
-    const result = spawnEventsOnMap(buildEmptyMapNodes(), eventStates, buildCtx(1, eventStates), 1)
-    setMapNodes(result.nodes)
-    setEventStates(result.states)
+    runSpawn(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Slot / intelligence assignment (passed to Map) ───────────────────
+  const handleSlotAssign = useCallback((eventId: string, slotId: string, agentId: string | null) =>
+    dispatch({ type: 'ASSIGN_AGENT', eventId, slotId, agentId }), [dispatch])
 
-  const handleSlotAssign = (eventId: string, slotId: string, agentId: string | null) => {
-    setMapNodes(prev => assignSlot(prev, eventId, slotId, agentId))
-  }
+  const handleIntelAssign = useCallback((eventId: string, intelItem: IntelligenceItem | null) =>
+    dispatch({ type: 'ASSIGN_INTELLIGENCE', eventId, item: intelItem }), [dispatch])
 
-  const handleIntelAssign = (eventId: string, intelItem: IntelligenceItem | null) => {
-    setMapNodes(prev => assignIntelligence(prev, eventId, intelItem))
-  }
-
-  const handleCommitEvent = (eventId: string) => {
-    const { nodes, consumedIntel } = commitEvent(mapNodes, eventId, currentDay)
-    setMapNodes(nodes)
-    if (consumedIntel) {
-      setIntelligence(prev => {
-        const next = { ...prev, [consumedIntel.type]: { ...prev[consumedIntel.type] } }
-        next[consumedIntel.type][consumedIntel.tier] = Math.max(0, next[consumedIntel.type][consumedIntel.tier] - 1)
-        return next
-      })
+  const handleCommitEvent = useCallback((eventId: string) => {
+    let consumedIntel: IntelligenceItem | null = null
+    for (const node of mapNodes) {
+      const ev = node.events.find(e => e.id === eventId)
+      if (ev) { consumedIntel = ev.assignedIntelligence ?? null; break }
     }
-  }
+    dispatch({ type: 'COMMIT_EVENT', eventId })
+    if (consumedIntel) dispatch({ type: 'SPEND_INTELLIGENCE', intelType: consumedIntel.type, tier: consumedIntel.tier })
+  }, [dispatch, mapNodes])
 
-  const handleCancelCommit = (eventId: string) => {
-    const result = cancelCommit(mapNodes, eventId, currentDay)
-    if (!result) return
-    setMapNodes(result.nodes)
-    if (result.returnedIntel) {
-      const ri = result.returnedIntel
-      setIntelligence(prev => {
-        const next = { ...prev, [ri.type]: { ...prev[ri.type] } }
-        next[ri.type][ri.tier] += 1
-        return next
-      })
-    }
-  }
+  const handleCancelCommit = useCallback((eventId: string) => {
+    let ev: import('@core/types').GameEvent | undefined
+    for (const node of mapNodes) { ev = node.events.find(e => e.id === eventId); if (ev) break }
+    if (!ev || !ev.committed || ev.inProgress || ev.committedOnDay !== currentDay) return
+    dispatch({ type: 'CANCEL_COMMIT', eventId })
+    if (ev.assignedIntelligence) dispatch({ type: 'ADD_INTELLIGENCE', intelType: ev.assignedIntelligence.type, tier: ev.assignedIntelligence.tier, amount: 1 })
+  }, [dispatch, mapNodes, currentDay])
 
-  // ── End day: build queue and start resolution ───────────────────────
+  const handleEndDay = useCallback(() => {
+    const { queue, toCommit } = buildResolutionQueue(mapNodes, allAgents, currentDay)
 
-  const handleEndDay = () => {
-    const { queue, toCommit } = buildResolutionQueue(mapNodes, agents, currentDay)
-
-    // Apply multi-day commitments (set inProgress, lock agents)
+    // Apply multi-day commitments
     if (toCommit.length > 0) {
       const commitMap = new Map(toCommit.map(c => [c.eventId, c]))
-      setMapNodes(prev => prev.map(node => ({
+      const updatedNodes = mapNodes.map(node => ({
         ...node,
         events: node.events.map(ev => {
           const commit = commitMap.get(ev.id)
           if (!commit) return ev
           return { ...ev, inProgress: true, resolveOnDay: commit.resolveOnDay }
         }),
-      })))
+      }))
+      dispatch({ type: 'SET_MAP_NODES', nodes: updatedNodes })
     }
 
     if (queue.length === 0) {
@@ -190,15 +157,14 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
       return
     }
 
-    setResolutionQueue(queue)
-    setResolutionIndex(0)
+    const eventIds = queue.map(q => q.defId)
+    dispatch({ type: 'SET_RESOLUTION_QUEUE', eventIds })
     checkForDilemma(queue[0])
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapNodes, allAgents, currentDay, dispatch])
 
-  // ── Check if a queue item needs a dilemma before dice ───────────────
-
-  const checkForDilemma = (item: ResolutionQueueItem) => {
-    if (item.isExpired) return // skip dilemma for expired events
+  const checkForDilemma = useCallback((item: ResolutionQueueItem) => {
+    if (item.isExpired) return
 
     const def = DEFS_BY_ID[item.defId]
     if (def?.dilemma && (def.dilemma.timing === 'before-roll' || def.dilemma.timing === 'standalone')) {
@@ -210,116 +176,106 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
         choices: def.dilemma.choices.map(c => ({
           id: c.id,
           label: c.label,
-          description: c.description,
-          consequences: Object.entries(c.moralWeight ?? {})
-            .filter(([, v]) => v !== 0)
-            .map(([k, v]) => `${k} ${(v as number) > 0 ? '+' : ''}${v}`)
-            .join(', ') || '',
           reputationDelta: c.moralWeight as Partial<ReputationState> | undefined,
         })),
       }
       setActiveDilemma(dilemmaData)
       setPendingDilemmaEventId(item.defId)
     }
-  }
+  }, [])
 
-  // ── Dilemma resolved → apply reputation, then continue resolution ───
+  const handleDilemmaResolve = useCallback((result: DilemmaResult) => {
+    const currentState = stateRef.current
+    const repResult = processReputationChange(result.reputationDelta, currentState, `dilemma:${pendingDilemmaEventId}`)
+    for (const action of repResult.actions) dispatch(action)
+    if (repResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: repResult.narrativeEntries })
 
-  const handleDilemmaResolve = (result: DilemmaResult) => {
-    // Apply reputation
-    setReputation(prev => {
-      const next = { ...prev }
-      for (const [k, v] of Object.entries(result.reputationDelta)) {
-        next[k as keyof ReputationState] += v as number
-      }
-      return next
-    })
+    const eventId = resolutionQueueRef.current[resolutionIndexRef.current]
+    const def = eventId ? DEFS_BY_ID[eventId] : undefined
+    const chosenOption = def?.dilemma?.choices.find(c => c.id === result.choiceId)
+    if (chosenOption?.immediateConsequences) {
+      const cResult = processConsequences(chosenOption.immediateConsequences, currentState, `dilemma:${pendingDilemmaEventId}:${result.choiceId}`)
+      for (const action of cResult.actions) dispatch(action)
+      if (cResult.narrativeEntries.length > 0) dispatch({ type: 'RECORD_NARRATIVES', entries: cResult.narrativeEntries })
+    }
 
-    // Record choice
     if (pendingDilemmaEventId) {
-      setEventStates(prev => {
-        const next = new Map(prev)
-        const existing = next.get(pendingDilemmaEventId)
-        if (existing) next.set(pendingDilemmaEventId, { ...existing, choiceId: result.choiceId })
-        return next
+      dispatch({
+        type: 'RECORD_NARRATIVE',
+        entry: { day: currentDay, kind: 'choice_made', eventId: pendingDilemmaEventId, dilemmaId: def?.dilemma?.id ?? pendingDilemmaEventId, choiceId: result.choiceId },
       })
+      // Update event state with choiceId
+      const existing = eventStates[pendingDilemmaEventId]
+      if (existing) {
+        dispatch({ type: 'SET_EVENT_STATE', eventId: pendingDilemmaEventId, state: { ...existing, choiceId: result.choiceId } })
+      }
     }
 
     setActiveDilemma(null)
     setPendingDilemmaEventId(null)
 
-    // Check if the dilemma was standalone (skipDiceRoll) — if so, auto-resolve
-    const item = resolutionQueue[resolutionIndex]
-    const def = DEFS_BY_ID[item.defId]
-    const choice = def?.dilemma?.choices.find(c => c.id === result.choiceId)
-
-    if (choice?.skipDiceRoll || def?.dilemma?.timing === 'standalone') {
-      // Skip dice, move to next or finish
-      handleResolutionComplete(item, true)
+    const curEventId = resolutionQueueRef.current[resolutionIndexRef.current]
+    if (chosenOption?.skipDiceRoll || def?.dilemma?.timing === 'standalone') {
+      if (curEventId) handleResolutionComplete(curEventId, true)
     }
-    // Otherwise: the resolution modal will appear with dice
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateRef, pendingDilemmaEventId, currentDay, dispatch, resolutionQueueRef, resolutionIndexRef])
 
-  // ── Resolution complete for one event ───────────────────────────────
+  const handleResolutionComplete = useCallback((eventId: string, success: boolean) => {
+    let isExpired = false
+    for (const node of mapNodes) {
+      const ev = node.events.find(e => e.id === eventId)
+      if (ev && (ev.isExpired || (ev.daysRemaining === 1 && !ev.committed))) {
+        isExpired = true
+        break
+      }
+    }
+    const resolution: ResolutionType = isExpired ? 'expired' : success ? 'success' : 'failure'
+    dispatch({ type: 'RESOLVE_EVENT', eventId, resolution, choiceId: eventStates[eventId]?.choiceId })
+    dispatch({ type: 'RECORD_NARRATIVE', entry: { day: currentDay, kind: 'event_resolved', eventId, resolution } })
 
-  const handleResolutionComplete = (item: ResolutionQueueItem, success: boolean) => {
-    const resolution: ResolutionType = item.isExpired ? 'expired' : success ? 'success' : 'failure'
-
-    // Record in event states
-    setEventStates(prev => {
-      const next = new Map(prev)
-      const existing = next.get(item.defId)
-      next.set(item.defId, {
-        defId: item.defId,
-        state: 'resolved',
-        resolution,
-        choiceId: existing?.choiceId,
-        dayPlaced: existing?.dayPlaced,
-        dayResolved: currentDay,
-      })
-      return next
-    })
-
-    // Move to next in queue
     const nextIdx = resolutionIndex + 1
     if (nextIdx < resolutionQueue.length) {
-      setResolutionIndex(nextIdx)
-      checkForDilemma(resolutionQueue[nextIdx])
+      dispatch({ type: 'ADVANCE_RESOLUTION' })
+      const nextEventId = resolutionQueue[nextIdx]
+      for (const node of mapNodes) {
+        const ev = node.events.find(e => e.id === nextEventId)
+        if (!ev) continue
+        const assignedAgents = ev.slots
+          .filter(s => s.assignedAgentId != null)
+          .map(s => allAgents.find(a => a.id === s.assignedAgentId)!)
+          .filter(Boolean)
+        const nextItem = ev.isExpired || (ev.daysRemaining === 1 && !ev.committed)
+          ? { event: ev, assignedAgents: [], pool: 0, tier: 'clay' as AgentTier, statTotals: {}, isExpired: true, defId: ev.id }
+          : buildQueueItem(ev, assignedAgents)
+        checkForDilemma(nextItem)
+        break
+      }
     } else {
-      // All resolved, advance day
-      setResolutionQueue([])
-      setResolutionIndex(0)
+      dispatch({ type: 'SET_RESOLUTION_QUEUE', eventIds: [] })
       advanceDay()
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapNodes, eventStates, currentDay, state, resolutionIndex, resolutionQueue, allAgents, dispatch])
 
-  // ── Advance to next day ─────────────────────────────────────────────
-
-  const advanceDay = () => {
-    const resolvedIds = new Set(resolutionQueue.map(item => item.defId))
+  const advanceDay = useCallback(() => {
+    const resolvedIds = new Set(resolutionQueueRef.current)
     const { nodes: cleanedNodes, expiredIds } = advanceDayOnMap(mapNodes, resolvedIds, currentDay)
-
-    // Record expirations
-    if (expiredIds.length > 0) {
-      setEventStates(prev => {
-        const next = new Map(prev)
-        for (const id of expiredIds) {
-          next.set(id, { defId: id, state: 'resolved', resolution: 'expired', dayResolved: currentDay })
-        }
-        return next
-      })
+    for (const id of expiredIds) {
+      dispatch({ type: 'RESOLVE_EVENT', eventId: id, resolution: 'expired' })
+      dispatch({ type: 'RECORD_NARRATIVE', entry: { day: currentDay, kind: 'event_resolved', eventId: id, resolution: 'expired' } })
     }
 
-    setMapNodes(cleanedNodes)
-    setCurrentDay(currentDay + 1)
-  }
+    dispatch({ type: 'SET_MAP_NODES', nodes: cleanedNodes })
+    dispatch({ type: 'ADVANCE_DAY' })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapNodes, currentDay, dispatch])
 
-  // Spawn new events when day changes (avoids stale closure)
+  // Spawn new events when day changes
   useEffect(() => {
     if (currentDay <= 1) return
-    runSpawn(currentDay, eventStates)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDay])
+    runSpawn(currentDay)
+  }, [currentDay, runSpawn])
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -330,7 +286,7 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
         style={{ borderColor: 'rgba(232,213,176,0.1)', background: 'rgba(10,6,4,0.97)' }}>
         <div className="flex items-center gap-4">
           <h1 className="font-serif text-base text-gold">Inner Officials</h1>
-          <span className="text-xs text-silk/30">Act 1 — Taizong's Court</span>
+          <span className="text-xs text-silk/30">Act 1 -- Taizong's Court</span>
         </div>
         <div className="flex items-center gap-6 text-xs">
           <span className="text-parchment font-serif font-bold">Day {currentDay}</span>
@@ -367,7 +323,7 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
         <PalaceMap
           nodes={mapNodes}
           agents={agents}
-          allAgents={agents}
+          allAgents={allAgents}
           selectedNodeId={selectedNodeId}
           onNodeClick={(id) => setSelectedNodeId(prev => prev === id ? null : id)}
           onSlotAssign={handleSlotAssign}
@@ -381,7 +337,7 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
         />
       </main>
 
-      {/* Resolution modal — dice roll for non-dilemma events */}
+      {/* Resolution modal -- dice roll for non-dilemma events */}
       {isResolutionOpen && currentResItem && !activeDilemma && (
         <ResolutionModal
           item={currentResItem}
@@ -390,8 +346,8 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
           nextDay={currentDay + 1}
           goldenDiceAvailable={goldenDice}
           onComplete={(success, goldenSpent) => {
-            if (goldenSpent > 0) setGoldenDice(n => Math.max(0, n - goldenSpent))
-            handleResolutionComplete(currentResItem, success)
+            if (goldenSpent > 0) dispatch({ type: 'CHANGE_GOLDEN_DICE', delta: -goldenSpent })
+            handleResolutionComplete(currentResItem.defId, success)
           }}
         />
       )}
@@ -400,159 +356,6 @@ export function GamePlay({ stats, silver: initialSilver, choices }: Props) {
       {activeDilemma && (
         <Dilemma data={activeDilemma} onResolve={handleDilemmaResolve} />
       )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ResolutionModal — shows dice roll for one event
-// ---------------------------------------------------------------------------
-
-function ResolutionModal({ item, index, total, nextDay, goldenDiceAvailable, onComplete }: {
-  item: ResolutionQueueItem
-  index: number
-  total: number
-  nextDay: number
-  goldenDiceAvailable: number
-  onComplete: (success: boolean, goldenSpent: number) => void
-}) {
-  const [rollConfig, setRollConfig] = useState<DiceRollConfig | null>(null)
-  const [rollResult, setRollResult] = useState<DiceRollResult | null>(null)
-  const [goldenSpent, setGoldenSpent] = useState(0)
-  const isLast = index === total - 1
-  const uc = URGENCY_COLOR[item.event.urgency]
-
-  // Auto-trigger roll
-  useEffect(() => {
-    setRollResult(null)
-    setGoldenSpent(0)
-    if (item.isExpired) return
-    const t = setTimeout(() => {
-      setRollConfig({
-        pool: item.pool,
-        threshold: item.event.threshold,
-        tier: item.tier,
-        difficulty: 'standard',
-        goldenDice: 0,
-        eventLabel: item.event.title,
-      })
-    }, 300)
-    return () => clearTimeout(t)
-  }, [item.event.id, item.pool, item.isExpired, item.tier, item.event.threshold, item.event.title])
-
-  const effectiveResult = rollResult ? (() => {
-    if (goldenSpent === 0) return rollResult
-    const successes = rollResult.successes + goldenSpent
-    return {
-      ...rollResult,
-      successes,
-      isSuccess: successes >= item.event.threshold,
-      isCriticalFailure: false,
-      margin: successes - item.event.threshold,
-    }
-  })() : null
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(5,3,1,0.9)' }}>
-      <div className="w-full max-w-lg mx-4 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
-        style={{ background: '#0d0800', border: '1px solid rgba(232,213,176,0.13)', maxHeight: '90vh' }}>
-
-        {/* Header */}
-        <div className="px-5 py-3 border-b border-silk/10 flex-shrink-0">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] uppercase tracking-widest text-silk/35">{index + 1} / {total}</span>
-            <span className="text-[8px] px-2 py-0.5 rounded-full font-semibold uppercase"
-              style={{ background: `${uc.badge}22`, color: uc.badge }}>
-              {URGENCY_LABEL[item.event.urgency]}
-            </span>
-          </div>
-          <h2 className="font-serif text-lg text-parchment leading-tight">{item.event.title}</h2>
-          <p className="text-[10px] text-silk/40 mt-0.5 leading-relaxed line-clamp-2">{item.event.description}</p>
-        </div>
-
-        {item.isExpired ? (
-          <div className="px-5 py-8 flex flex-col items-center gap-3">
-            <div className="text-4xl">&#8987;</div>
-            <div className="text-parchment/60 font-serif text-base">Event Expired</div>
-            <button onClick={() => onComplete(false, 0)} className="mt-2 px-5 py-2 rounded-lg text-sm font-serif"
-              style={{ background: 'rgba(232,213,176,0.08)', border: '1px solid rgba(232,213,176,0.18)', color: 'rgba(232,213,176,0.6)' }}>
-              {isLast ? `Begin Day ${nextDay}` : 'Next'}
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Stat breakdown */}
-            <div className="px-5 py-3 border-b border-silk/10 flex-shrink-0">
-              <div className="flex items-start gap-4 flex-wrap">
-                {item.event.statsChecked.map(stat => (
-                  <div key={stat} className="min-w-[60px]">
-                    <div className="text-[8px] uppercase tracking-widest text-silk/35 mb-1">{STAT_LABELS[stat].en}</div>
-                    <div className="text-xl font-bold" style={{ color: uc.badge }}>{item.statTotals[stat] ?? 0}</div>
-                    {item.assignedAgents.map(a => {
-                      const eff = applyEquipmentBonuses(a.stats, a.equipment) as Record<string, number>
-                      return <div key={a.id} className="text-[8px] text-silk/30">{a.name.split(' ')[0]}: {eff[stat] ?? 0}</div>
-                    })}
-                  </div>
-                ))}
-                <div className="ml-auto text-right border-l border-silk/10 pl-4">
-                  <div className="text-[8px] uppercase tracking-widest text-silk/35 mb-1">Dice Pool</div>
-                  <div className="text-xl font-bold text-parchment">{item.pool}d</div>
-                  <div className="text-[9px] text-silk/35">need {item.event.threshold}+</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Dice */}
-            <div className="flex-1 min-h-0" style={{ height: 200 }}>
-              <Dice
-                rollConfig={rollConfig}
-                onRollSettled={setRollResult}
-                canvasHeight="200px"
-                goldenDiceSpent={goldenSpent}
-                displayResult={effectiveResult}
-                onDismiss={() => {}}
-              />
-            </div>
-
-            {/* Result */}
-            {effectiveResult && (
-              <div className="px-5 py-3 border-t border-silk/10 flex-shrink-0">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <div className="text-xl font-bold font-serif"
-                      style={{ color: effectiveResult.isSuccess ? '#00a86b' : '#e04030' }}>
-                      {effectiveResult.isSuccess ? 'Success' : 'Failed'}
-                    </div>
-                    <div className="text-[10px] text-silk/40 mt-0.5">
-                      {effectiveResult.successes} of {item.event.threshold} needed
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onComplete(effectiveResult.isSuccess, goldenSpent)}
-                    className="px-5 py-2 rounded-lg text-sm font-serif font-semibold transition-all hover:brightness-125"
-                    style={{
-                      background: isLast ? 'rgba(255,215,0,0.15)' : 'rgba(232,213,176,0.1)',
-                      border: `1px solid ${isLast ? 'rgba(255,215,0,0.4)' : 'rgba(232,213,176,0.2)'}`,
-                      color: isLast ? 'rgba(255,215,0,0.9)' : 'rgba(232,213,176,0.7)',
-                    }}>
-                    {isLast ? `Begin Day ${nextDay}` : 'Next'}
-                  </button>
-                </div>
-
-                {/* Golden die button */}
-                {goldenDiceAvailable - goldenSpent > 0 && (
-                  <button
-                    onClick={() => setGoldenSpent(n => n + 1)}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-all"
-                    style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: 'rgba(255,215,0,0.85)' }}>
-                    Golden Die ({goldenDiceAvailable - goldenSpent})
-                  </button>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
     </div>
   )
 }

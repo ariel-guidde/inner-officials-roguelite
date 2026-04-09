@@ -1,6 +1,6 @@
 # Inner Officials Roguelite
 
-A browser-based political intrigue roguelite set in the Tang Dynasty imperial harem. Built with React, Three.js, and Zustand. Inspired by "The Sultan's Game" by Double Cross.
+A browser-based political intrigue roguelite set in the Tang Dynasty imperial court. Built with React, Three.js, and useReducer/Context. Inspired by "The Sultan's Game" by Double Cross.
 
 ## Commands
 
@@ -13,7 +13,7 @@ A browser-based political intrigue roguelite set in the Tang Dynasty imperial ha
 
 ### Stack
 
-React 18 + TypeScript 5 + Vite 5. Three.js with @react-three/fiber and @react-three/rapier for 3D physics-based dice rolling. Zustand + Immer for state management. Mitt for event bus. Tailwind CSS for styling.
+React 18 + TypeScript 5 + Vite 5. Three.js with @react-three/fiber and @react-three/rapier for 3D physics-based dice rolling. useReducer + Context for state management (GameStateContext). Mitt for event bus. Tailwind CSS for styling.
 
 ### Path Aliases
 
@@ -26,7 +26,7 @@ React 18 + TypeScript 5 + Vite 5. Three.js with @react-three/fiber and @react-th
 
 ```
 src/
-  core/           # Domain types (types.ts), Zustand store (store.ts), event bus (events.ts)
+  core/           # Domain types (types.ts), GameState reducer + context, event bus (events.ts), save/load, consequences
   modules/
     dice/         # 3D physics-based dice rolling (Three.js + Rapier)
     events/       # Event definitions, storylines, event pool
@@ -47,7 +47,7 @@ design/
 ### Key Patterns
 
 - **Single source of truth:** All domain types in `src/core/types.ts`. Modules never redefine core types.
-- **Zustand + Immer:** Central store in `src/core/store.ts` with immutable updates. Components subscribe via selector hooks.
+- **useReducer + Context:** Central GameState in `src/core/gameState.ts` with pure reducer. Components use `useGameState()` hook. Fully serializable for save/load.
 - **Event bus (mitt):** Cross-module communication without direct module dependencies.
 - **Module independence:** Each module under `src/modules/` is self-contained. Modules communicate only through the core store and event bus.
 - **Strict TypeScript:** `strict: true`, union types for extensibility (e.g., `Consequence` variants).
